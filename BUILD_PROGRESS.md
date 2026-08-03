@@ -12,9 +12,9 @@
 
 | | |
 |---|---|
-| **Repo** | (fill in: your GitHub repo URL once created) |
-| **Last updated** | (ISO timestamp) |
-| **Last session ended because** | (e.g. "task complete" / "hit usage limit mid-task" / "human paused") |
+| **Repo** | https://github.com/Starboy-V/BussinessOS |
+| **Last updated** | 2026-08-03 |
+| **Last session ended because** | task complete, stopping point reached cleanly |
 
 ---
 
@@ -22,13 +22,13 @@
 
 **Phase 0 — "Prove the Workflow"** (PRD §3) — offline single-business PWA, no backend.
 
-## Status: NOT STARTED
+## Status: IN PROGRESS
 
 ---
 
 ## Next Task (start here)
 
-1. Scaffold the project: `index.html`, `manifest.json`, service worker registration, Dexie.js installed and initialized with the schema below.
+2. Define the Dexie schema (PRD §11 tables, single-business subset, no `business_id` yet) in `js/db.js` — replace the commented-out placeholder with real `db.version(1).stores({...})` covering `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`.
 
 *(Whoever — or whatever session — picks this up next: do this one task, update the checklist and this "Next Task" line, commit, then stop and reassess. Don't chain multiple unrelated tasks in one uncommitted block of work.)*
 
@@ -38,7 +38,7 @@
 
 Each box maps to a PRD section — check the section before marking done, don't rely on memory of what "should" be there.
 
-- [ ] Repo scaffolding: `index.html`, `manifest.json`, service worker, Dexie.js wired up
+- [x] Repo scaffolding: `index.html`, `manifest.json`, service worker, Dexie.js wired up
 - [ ] Dexie schema mirrors PRD §11 tables (single-business subset, no `business_id` yet): `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`
 - [ ] Bottom nav shell — Home / Jobs / Bill / Inventory / More (PRD §8)
 - [ ] Home Dashboard screen (PRD §9 wireframe, §6.10 metrics)
@@ -72,13 +72,19 @@ If a task seems to require reopening one of these, stop and flag it below instea
 
 ## Blockers / Open Questions For The Human
 
-*(nothing yet — add here anything that needs a decision only the founder can make, e.g. PRD §20's open questions)*
+- `icons/icon-192.png` and `icons/icon-512.png` are crude generated placeholders (solid color + "B" monogram), not real branding. Fine for install testing, worth swapping before showing this to the actual garage owner.
 
 ---
 
 ## Files Created So Far
 
-*(nothing yet — list paths as they're created, so a new session can orient without re-reading every file)*
+- `index.html` — app shell, bottom nav (Home/Jobs/Bill/Inventory/More), Alpine.js-driven screen switching, placeholder content per screen
+- `manifest.json` — PWA manifest, standalone display, theme color
+- `sw.js` — service worker, caches app shell + CDN deps (Dexie/Alpine) for zero-connectivity use per §7
+- `css/style.css` — design tokens (44px tap targets, high-contrast text, system font stack for offline reliability)
+- `js/app.js` — Alpine controller for nav/screen state
+- `js/db.js` — Dexie initialized, schema intentionally deferred to next task
+- `icons/icon-192.png`, `icons/icon-512.png` — placeholder PWA icons (see Blockers)
 
 ---
 
@@ -87,3 +93,4 @@ If a task seems to require reopening one of these, stop and flag it below instea
 *(one line per session, oldest first — append, never delete)*
 
 - Session 0 — checkpoint file created, no code written yet.
+- Session 1 — Phase 0 task 1 complete: PWA shell scaffolded (index.html, manifest, service worker, css, Alpine app controller, Dexie stub, placeholder icons). Next: Dexie schema.

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>BusinessOS</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#C2410C" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div id="app" x-data="app()" x-init="init()">
+    <header class="topbar">
+      <span class="topbar-title" x-text="screenTitle"></span>
+    </header>
+
+    <main class="content">
+      <template x-if="screen === 'home'">
+        <div class="placeholder-screen"><p>Home Dashboard — next build step.</p></div>
+      </template>
+      <template x-if="screen === 'jobs'">
+        <div class="placeholder-screen"><p>Jobs — coming soon.</p></div>
+      </template>
+      <template x-if="screen === 'bill'">
+        <div class="placeholder-screen"><p>New Bill — coming soon.</p></div>
+      </template>
+      <template x-if="screen === 'inventory'">
+        <div class="placeholder-screen"><p>Inventory — coming soon.</p></div>
+      </template>
+      <template x-if="screen === 'more'">
+        <div class="placeholder-screen"><p>More — coming soon.</p></div>
+      </template>
+    </main>
+
+    <nav class="bottom-nav">
+      <button :class="{active: screen === 'home'}" @click="go('home')">
+        <span class="nav-icon">⌂</span><span class="nav-label">Home</span>
+      </button>
+      <button :class="{active: screen === 'jobs'}" @click="go('jobs')">
+        <span class="nav-icon">📋</span><span class="nav-label">Jobs</span>
+      </button>
+      <button :class="{active: screen === 'bill'}" @click="go('bill')">
+        <span class="nav-icon">➕</span><span class="nav-label">Bill</span>
+      </button>
+      <button :class="{active: screen === 'inventory'}" @click="go('inventory')">
+        <span class="nav-icon">📦</span><span class="nav-label">Inventory</span>
+      </button>
+      <button :class="{active: screen === 'more'}" @click="go('more')">
+        <span class="nav-icon">⋯</span><span class="nav-label">More</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW registration failed', err));
+      });
+    }
+  </script>
+</body>
+</html>

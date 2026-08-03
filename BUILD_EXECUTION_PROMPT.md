@@ -26,24 +26,59 @@ mid-task, you lose at most that one task, never the whole session.
 
 ## The mechanism, concretely
 
-1. **Create a private GitHub repo** for this project (a couple minutes, free).
-2. **Build with Claude Code**, not claude.ai chat, for the actual multi-day
-   build. Claude Code runs against a real local (or cloud) working directory
-   with your own git credentials already configured — so commits and pushes
-   just work, and nothing sensitive needs to be pasted into a chat window.
-   *(If you'd rather stay in claude.ai chat: Claude's sandbox here can also
-   reach github.com directly, but you'd need to hand it a GitHub token each
-   session, which is worth avoiding if Claude Code is an option.)*
-3. Every session — regardless of account — starts with the ritual below.
-4. Every session ends by committing and pushing, even if the task isn't
-   finished — a half-done task with an honest note in `BUILD_PROGRESS.md`
-   beats an uncommitted task that vanishes with the session.
+1. **Create a private (or public) GitHub repo** for this project — already done: `Starboy-V/BussinessOS`.
+2. **Pick a build environment.** Two options, both work with the same
+   `BUILD_PROGRESS.md` checkpoint:
+
+   - **Claude Code** (needs Pro/Max/Team/Enterprise/Console — not available
+     on the free plan) — runs against a real local clone with your own git
+     credentials already configured, so commits and pushes just happen.
+   - **claude.ai chat** (works on the **free plan** — code execution and
+     file creation are available at every tier, only Claude Code itself is
+     paid-only) — Claude can still `git clone` the public repo directly
+     (no credentials needed to *read* a public repo) and do the work, but
+     can't `git push` back without something authorizing it. See "Syncing
+     back to GitHub" below for the two ways to close that gap.
+
+3. Every session — regardless of account or which of the two above — starts
+   with the ritual below.
+4. Every session ends with progress recorded somewhere durable: a real commit
+   (if push access exists) or files handed back for you to add to the repo
+   yourself (if it doesn't) — either way, `BUILD_PROGRESS.md` must be
+   accurate before the session ends.
+
+---
+
+## Syncing back to GitHub without Claude Code
+
+Since chat sessions can't push on their own, pick one:
+
+**Option A — Manual upload (zero credentials, a bit more hands-on).**
+At the end of each session, Claude hands you the new/changed files. Go to
+the repo on GitHub → **Add file → Upload files** → drag them in → commit.
+GitHub's uploader accepts multiple files (and preserves folder structure if
+you drag a folder) in one commit. Takes under a minute per session.
+
+**Option B — Scoped token (more automated, small tradeoff).**
+Create a **fine-grained GitHub Personal Access Token** scoped to *only* this
+one repo, with **Contents: Read and write** permission and nothing else
+(Settings → Developer settings → Personal access tokens → Fine-grained →
+select "Only select repositories" → `BussinessOS`). Paste it into the chat
+when you want that session to push directly. Because it's scoped to one
+repo and one permission, the blast radius if it ever leaked is small, and
+you can revoke or regenerate it from GitHub any time — including right
+after each session, if you want to be extra careful.
+
+Either way works with the same checkpoint file — Option A just means you're
+the one doing the final `git add / commit`, instead of Claude.
 
 ---
 
 ## Start-of-session ritual (non-negotiable, every session)
 
-1. `git pull` — get the latest state, don't assume you remember it.
+1. Get the current state: `git pull` if a local clone already exists
+   (Claude Code), or `git clone https://github.com/Starboy-V/BussinessOS.git`
+   fresh (chat sessions start with nothing on disk every time).
 2. Read `BUILD_PROGRESS.md` top to bottom.
 3. Run `git log --oneline -10` — the last few commits say what actually
    happened, which is more reliable than any summary.
@@ -56,7 +91,9 @@ mid-task, you lose at most that one task, never the whole session.
 - Work in small, committable units. A "unit" is roughly one checklist item
   from `BUILD_PROGRESS.md` — one screen, one schema piece, one function.
 - After finishing a unit: update the checklist, update "Next Task," commit
-  code + `BUILD_PROGRESS.md` together, in the same commit.
+  code + `BUILD_PROGRESS.md` together, in the same commit (Claude Code), or
+  bundle the changed files together ready to hand over (chat, Option A) —
+  either way, treat that unit as the save point.
 - If something forces a decision not already covered in the PRD or the
   "Decisions Already Locked In" list, write it into "Blockers / Open
   Questions For The Human" rather than guessing — that section exists so a
@@ -65,10 +102,14 @@ mid-task, you lose at most that one task, never the whole session.
 
 ## End-of-session ritual
 
-- Commit and push, even mid-task — update "Next Task" to say precisely where
-  it was left off (e.g. "Dexie schema written, jobs table done, inventory
-  table not started yet") rather than a vague "in progress."
-- Add one line to the Session Log.
+- **Claude Code, or chat with a token (Option B):** commit and push, even
+  mid-task — update "Next Task" to say precisely where it was left off (e.g.
+  "Dexie schema written, jobs table done, inventory table not started yet")
+  rather than a vague "in progress."
+- **Chat without a token (Option A):** present every new/changed file,
+  including the updated `BUILD_PROGRESS.md`, clearly enough that uploading
+  them to GitHub takes one pass — don't make the human hunt for what changed.
+- Add one line to the Session Log either way.
 
 ---
 
@@ -76,25 +117,31 @@ mid-task, you lose at most that one task, never the whole session.
 
 ```
 You're continuing an existing build of BusinessOS, a garage-management PWA.
-The full spec is in BusinessOS_PRD.md in this repo — read it before writing
-any code if you haven't already. Do not re-derive architecture decisions;
-they're already made and documented in §3–§15 of the PRD.
+The repo is https://github.com/Starboy-V/BussinessOS — if it's not already
+on disk, clone it first. The full spec is in BusinessOS_PRD.md in that repo
+— read it before writing any code if you haven't already. Do not re-derive
+architecture decisions; they're already made and documented in §3–§15 of
+the PRD.
 
 Before doing anything else:
-1. Read BUILD_PROGRESS.md in full.
-2. Run `git log --oneline -10` to see recent history.
-3. Resume from the "Next Task" line. Don't restart, don't skip ahead.
+1. Get the repo (clone fresh, or pull if it's already checked out).
+2. Read BUILD_PROGRESS.md in full.
+3. Run `git log --oneline -10` to see recent history.
+4. Resume from the "Next Task" line. Don't restart, don't skip ahead.
 
 Work in small units matching the Phase 0 checklist in BUILD_PROGRESS.md.
-After each unit: update the checklist and "Next Task," then commit code and
-BUILD_PROGRESS.md together in one commit. If you hit a decision not already
-covered in the PRD or the "Decisions Already Locked In" list, write it to
-"Blockers / Open Questions For The Human" instead of guessing.
+After each unit: update the checklist and "Next Task." If you have push
+access (a configured git remote, or a token I've given you), commit code and
+BUILD_PROGRESS.md together in one commit. If you don't, hand me back the
+new/changed files — including the updated BUILD_PROGRESS.md — clearly enough
+that I can upload them to GitHub myself in one pass. If you hit a decision
+not already covered in the PRD or the "Decisions Already Locked In" list,
+write it to "Blockers / Open Questions For The Human" instead of guessing.
 
-At the end of this session, whatever the reason it ends, make sure the last
-commit leaves BUILD_PROGRESS.md accurate enough that a different Claude
-session, on a different account, with zero memory of this conversation,
-could read it and continue correctly.
+At the end of this session, whatever the reason it ends, make sure
+BUILD_PROGRESS.md — once it's back in the repo — is accurate enough that a
+different Claude session, on a different account, with zero memory of this
+conversation, could read it and continue correctly.
 ```
 
 ---
