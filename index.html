@@ -54,7 +54,186 @@
         <div class="placeholder-screen"><p>Jobs — coming soon.</p></div>
       </template>
       <template x-if="screen === 'bill'">
-        <div class="placeholder-screen"><p>New Bill — coming soon.</p></div>
+        <div class="bill-screen">
+
+          <template x-if="billSavedSummary">
+            <div class="bill-saved">
+              <p class="bill-saved-title">Bill saved ✓</p>
+              <p class="bill-saved-detail">
+                <span x-text="formatCurrency(billSavedSummary.total)"></span> —
+                <span x-text="billSavedSummary.customerName"></span>
+              </p>
+              <p class="bill-saved-note">
+                PDF generation &amp; share isn't wired up yet — that's the next build task.
+                Saved locally as <span x-text="billSavedSummary.deviceLocalId"></span>.
+              </p>
+              <button class="btn-primary" @click="startNewBill()">+ New Bill</button>
+            </div>
+          </template>
+
+          <template x-if="!billSavedSummary">
+            <div class="bill-screen">
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Customer</h2>
+                <template x-if="!billSelectedCustomer">
+                  <div>
+                    <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                           x-model="billCustomerQuery" @input="searchBillCustomer()" />
+                    <template x-if="billCustomerResults.length > 0">
+                      <ul class="bill-result-list">
+                        <template x-for="r in billCustomerResults" :key="r.customer.id">
+                          <li class="bill-result-item" @click="selectBillCustomer(r)">
+                            <span x-text="r.customer.name"></span>
+                            <span class="bill-result-sub"
+                                  x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </template>
+                    <button class="btn-secondary" @click="billNewCustomerMode = !billNewCustomerMode">+ New Customer</button>
+                    <template x-if="billNewCustomerMode">
+                      <div class="bill-inline-form">
+                        <input class="bill-input" type="text" placeholder="Name" x-model="billNewCustomerName" />
+                        <input class="bill-input" type="tel" placeholder="Phone" x-model="billNewCustomerPhone" />
+                        <button class="btn-primary" @click="saveNewBillCustomer()">Save Customer</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="billSelectedCustomer">
+                  <div class="bill-selected-customer">
+                    <div>
+                      <strong x-text="billSelectedCustomer.name"></strong><br />
+                      <span class="bill-result-sub" x-text="billSelectedCustomer.phone || ''"></span>
+                    </div>
+                    <button class="btn-link" @click="changeBillCustomer()">Change</button>
+                  </div>
+                </template>
+              </section>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Vehicle <span class="bill-optional">(optional)</span></h2>
+                  <template x-if="billVehicleResults.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="v in billVehicleResults" :key="v.id">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': billSelectedVehicle && billSelectedVehicle.id === v.id }"
+                                @click="billSelectedVehicle = v">
+                          <span x-text="v.vehicle_number"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <button class="btn-secondary" @click="billNewVehicleMode = !billNewVehicleMode">+ New Vehicle</button>
+                  <template x-if="billNewVehicleMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Plate number" x-model="billNewVehicleNumber" />
+                      <input class="bill-input" type="text" placeholder="Brand (optional)" x-model="billNewVehicleBrand" />
+                      <input class="bill-input" type="text" placeholder="Model (optional)" x-model="billNewVehicleModel" />
+                      <button class="btn-primary" @click="saveNewBillVehicle()">Save Vehicle</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Quick services</h2>
+                  <div class="bill-chip-row">
+                    <template x-for="s in billServiceCatalog" :key="s.id">
+                      <button class="bill-chip" @click="addServiceToBill(s)">
+                        <span x-text="s.name"></span>
+                        <span class="bill-chip-price" x-text="formatCurrency(s.price)"></span>
+                      </button>
+                    </template>
+                    <button class="bill-chip bill-chip--custom" @click="billCustomMode = !billCustomMode">+ Custom</button>
+                  </div>
+                  <template x-if="billCustomMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Description" x-model="billCustomDescription" />
+                      <input class="bill-input" type="number" placeholder="Price" x-model="billCustomPrice" />
+                      <label class="bill-checkbox-label">
+                        <input type="checkbox" x-model="billCustomSaveToCatalog" /> Save to catalog for next time
+                      </label>
+                      <button class="btn-primary" @click="addCustomLineItem()">Add</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Parts</h2>
+                  <template x-if="billInventoryItems.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="p in billInventoryItems" :key="p.id">
+                        <button class="bill-chip" @click="addPartToBill(p)">
+                          <span x-text="p.name"></span>
+                          <span class="bill-chip-price" x-text="formatCurrency(p.selling_price)"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="billInventoryItems.length === 0">
+                    <p class="bill-empty-note">No inventory items yet — add stock once the Inventory screen is built, or add this part as a custom line item above.</p>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billLineItems.length > 0">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Bill items</h2>
+                  <ul class="bill-line-items">
+                    <template x-for="li in billLineItems" :key="li.id">
+                      <li class="bill-line-item">
+                        <div class="bill-line-item-main">
+                          <span x-text="li.description"></span>
+                          <span class="bill-line-item-price" x-text="formatCurrency(li.quantity * li.unit_price)"></span>
+                        </div>
+                        <div class="bill-line-item-controls">
+                          <button class="qty-btn" @click="decrementLineItem(li.id)">−</button>
+                          <span x-text="li.quantity"></span>
+                          <button class="qty-btn" @click="incrementLineItem(li.id)">+</button>
+                          <button class="btn-link bill-remove" @click="removeBillLineItem(li.id)">Remove</button>
+                        </div>
+                      </li>
+                    </template>
+                  </ul>
+                </section>
+              </template>
+
+              <template x-if="billLineItems.length > 0">
+                <section class="bill-section">
+                  <div class="bill-adjust-row">
+                    <label>Discount <input class="bill-input bill-input--small" type="number" x-model="billDiscount" /></label>
+                    <label>Tax <input class="bill-input bill-input--small" type="number" x-model="billTax" /></label>
+                  </div>
+                  <div class="bill-total-row">
+                    <span>Total</span>
+                    <span class="bill-total-value" x-text="formatCurrency(billTotal)"></span>
+                  </div>
+                  <div class="bill-payment-row">
+                    <span class="bill-section-title">Payment</span>
+                    <div class="bill-chip-row">
+                      <template x-for="m in ['cash','upi','card','credit']" :key="m">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': billPaymentMethod === m }"
+                                @click="billPaymentMethod = m">
+                          <span x-text="m === 'upi' ? 'UPI' : m.charAt(0).toUpperCase() + m.slice(1)"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                  <button class="btn-primary btn-full" :disabled="billSaving" @click="saveBill()">
+                    <span x-text="billSaving ? 'Saving…' : 'Save Bill'"></span>
+                  </button>
+                </section>
+              </template>
+
+            </div>
+          </template>
+
+        </div>
       </template>
       <template x-if="screen === 'inventory'">
         <div class="placeholder-screen"><p>Inventory — coming soon.</p></div>

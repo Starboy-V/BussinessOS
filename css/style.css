@@ -122,6 +122,294 @@ html, body {
   padding: 24px 8px 8px;
 }
 
+/* ---- New Bill (Phase 0 task 5) ---- */
+
+.bill-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bill-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bill-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.bill-optional {
+  text-transform: none;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.bill-input {
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.bill-input--small {
+  width: 90px;
+  display: inline-block;
+}
+
+.bill-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.bill-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bill-result-item {
+  padding: 10px 12px;
+  min-height: var(--tap-target);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.bill-result-item:last-child { border-bottom: none; }
+
+.bill-result-sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.bill-selected-customer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bill-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bill-chip {
+  min-height: var(--tap-target);
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.bill-chip--active {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.bill-chip--custom {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.bill-chip-price {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.bill-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.bill-empty-note {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.bill-line-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bill-line-item {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 10px;
+}
+
+.bill-line-item:last-child { border-bottom: none; padding-bottom: 0; }
+
+.bill-line-item-main {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.bill-line-item-price { font-weight: 600; }
+
+.bill-line-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.qty-btn {
+  width: var(--tap-target);
+  height: var(--tap-target);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bill-remove {
+  margin-left: auto;
+  color: var(--color-danger);
+}
+
+.bill-adjust-row {
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.bill-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 16px;
+  font-weight: 600;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.bill-total-value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.bill-payment-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-primary {
+  min-height: var(--tap-target);
+  border: none;
+  border-radius: 10px;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-full { width: 100%; }
+
+.btn-secondary {
+  min-height: var(--tap-target);
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  background: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 0 14px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.btn-link {
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bill-saved {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 24px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.bill-saved-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-success);
+  margin: 0;
+}
+
+.bill-saved-detail {
+  font-size: 16px;
+  margin: 0;
+}
+
+.bill-saved-note {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0 0 12px;
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
