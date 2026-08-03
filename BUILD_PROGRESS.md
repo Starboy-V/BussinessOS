@@ -28,7 +28,7 @@
 
 ## Next Task (start here)
 
-2. Define the Dexie schema (PRD §11 tables, single-business subset, no `business_id` yet) in `js/db.js` — replace the commented-out placeholder with real `db.version(1).stores({...})` covering `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`.
+4. Build the Home Dashboard screen (PRD §9 wireframe, §6.10 metrics) — revenue/expense/profit cards, jobs-pending count, low-stock alert banner, reading from the Dexie tables now defined in `js/db.js`.
 
 *(Whoever — or whatever session — picks this up next: do this one task, update the checklist and this "Next Task" line, commit, then stop and reassess. Don't chain multiple unrelated tasks in one uncommitted block of work.)*
 
@@ -39,7 +39,8 @@
 Each box maps to a PRD section — check the section before marking done, don't rely on memory of what "should" be there.
 
 - [x] Repo scaffolding: `index.html`, `manifest.json`, service worker, Dexie.js wired up
-- [ ] Dexie schema mirrors PRD §11 tables (single-business subset, no `business_id` yet): `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`
+- [x] Dexie schema mirrors PRD §11 tables (single-business subset, no `business_id` yet): `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`
+- [x] Bottom nav shell — Home / Jobs / Bill / Inventory / More (PRD §8) — *shipped as part of task 1's commit, not its own; checked off here retroactively rather than leaving it stale*
 - [ ] Bottom nav shell — Home / Jobs / Bill / Inventory / More (PRD §8)
 - [ ] Home Dashboard screen (PRD §9 wireframe, §6.10 metrics)
 - [ ] New Bill screen (PRD §9 wireframe) — customer/vehicle search-or-create, quick-service buttons from seeded garage catalog, parts picker, discount/tax, PDF preview
@@ -83,7 +84,7 @@ If a task seems to require reopening one of these, stop and flag it below instea
 - `sw.js` — service worker, caches app shell + CDN deps (Dexie/Alpine) for zero-connectivity use per §7
 - `css/style.css` — design tokens (44px tap targets, high-contrast text, system font stack for offline reliability)
 - `js/app.js` — Alpine controller for nav/screen state
-- `js/db.js` — Dexie initialized, schema intentionally deferred to next task
+- `js/db.js` — Dexie initialized **and schema defined** (13 tables per PRD §11, single-business subset)
 - `icons/icon-192.png`, `icons/icon-512.png` — placeholder PWA icons (see Blockers)
 
 ---
@@ -94,3 +95,4 @@ If a task seems to require reopening one of these, stop and flag it below instea
 
 - Session 0 — checkpoint file created, no code written yet.
 - Session 1 — Phase 0 task 1 complete: PWA shell scaffolded (index.html, manifest, service worker, css, Alpine app controller, Dexie stub, placeholder icons). Next: Dexie schema.
+- Session 2 — Phase 0 task 2 complete: Dexie schema defined for all 13 tables in `js/db.js`. Retroactively checked off "bottom nav shell" since it shipped inside task 1's commit. Next: Home Dashboard screen.
