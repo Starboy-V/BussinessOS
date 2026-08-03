@@ -11,6 +11,37 @@ const JOB_STATUS_LABELS = {
   cancelled: 'Cancelled',
 };
 
+// Phase 0 task 9 (PRD §6.7): logo/address/footer/signature/terms/brand-color
+// customization is spec'd as coming from a business-profile Settings screen,
+// which doesn't exist yet in Phase 0 (no Settings task has been built —
+// Backup is the only Settings item on the checklist, and even that's still
+// open). Rather than block the PDF on a screen that isn't scoped yet, these
+// are hardcoded placeholders. Flagged in BUILD_PROGRESS.md Blockers — swap
+// this block for real Settings-backed values whenever that screen exists,
+// don't silently leave it hardcoded past Phase 0.
+const INVOICE_BUSINESS_PROFILE = {
+  name: 'BusinessOS Garage',
+  address: 'Address not set — configure in Settings',
+  footer: 'Thank you for your business.',
+  terms: 'Payment due on receipt unless otherwise agreed.',
+  brandColorHex: '#C2410C', // matches manifest.json theme-color for now
+};
+
+// pdf-lib's StandardFonts (WinAnsi encoding) cannot encode the ₹ glyph used
+// by the on-screen formatCurrency() — drawText() throws on unencodable
+// characters. "Rs." is used in the PDF only; the app UI is unaffected.
+function formatCurrencyPlain(amount) {
+  return 'Rs. ' + Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+function hexToRgb01(hex) {
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.substring(0, 2), 16) / 255;
+  const g = parseInt(clean.substring(2, 4), 16) / 255;
+  const b = parseInt(clean.substring(4, 6), 16) / 255;
+  return { r, g, b };
+}
+
 function app() {
   return {
     screen: 'home',
@@ -545,10 +576,27 @@ function app() {
         }
       );
 
+      // Snapshotted here (not read back from Dexie) because Phase 0's PDF
+      // generation (task 9) needs line items + discount/tax + contact info
+      // together, and this is the one point in the flow that already has
+      // all of it in memory without a second query.
       this.billSavedSummary = {
-        total: this.billTotal,
-        customerName: this.billSelectedCustomer.name,
+        invoiceId,
         deviceLocalId,
+        createdAt: now,
+        customerName: this.billSelectedCustomer.name,
+        customerPhone: this.billSelectedCustomer.phone || null,
+        lineItems: this.billLineItems.map((li) => ({
+          description: li.description,
+          quantity: li.quantity,
+          unit_price: li.unit_price,
+          line_total: li.quantity * li.unit_price,
+        })),
+        subtotal: this.billSubtotal,
+        discount: Number(this.billDiscount || 0),
+        tax: Number(this.billTax || 0),
+        total: this.billTotal,
+        paymentMethod: this.billPaymentMethod,
       };
       this.resetBillDraft();
       this.billSaving = false;
@@ -570,6 +618,151 @@ function app() {
     },
     startNewBill() {
       this.billSavedSummary = null;
+    },
+
+    // ---- Invoice PDF generation + sharing (Phase 0 task 9, PRD §6.7) ----
+    //
+    // Uses pdf-lib entirely client-side, no server round-trip, per the
+    // "Decisions Already Locked In" entry for PDF generation.
+    //
+    // Reference number rule: Phase 0 never assigns a real `invoice_number`
+    // (that's a row-locked counter assigned at sync time, §6.7, and no sync
+    // exists yet) — so the PDF header shows `device_local_id` labeled
+    // "pending sync" instead, matching the same rule the UI already follows
+    // for the "Invoice pending sync" label (task 7). Do NOT put a fabricated
+    // sequential number on this PDF even though it looks nicer — a garage
+    // owner handing this to a customer needs the number to be permanent
+    // from the moment it's shown, and this one isn't yet.
+    async buildInvoicePdfBytes(summary) {
+      const { PDFDocument, StandardFonts, rgb } = PDFLib;
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([595, 842]); // A4 portrait, points
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+      const brand = hexToRgb01(INVOICE_BUSINESS_PROFILE.brandColorHex);
+      const margin = 40;
+      let y = 800;
+
+      const line = (text, opts = {}) => {
+        page.drawText(text, {
+          x: opts.x ?? margin,
+          y,
+          size: opts.size ?? 11,
+          font: opts.bold ? bold : font,
+          color: opts.color ?? rgb(0.13, 0.13, 0.13),
+        });
+        y -= opts.gap ?? 18;
+      };
+
+      line(INVOICE_BUSINESS_PROFILE.name, { size: 18, bold: true, color: rgb(brand.r, brand.g, brand.b), gap: 22 });
+      line(INVOICE_BUSINESS_PROFILE.address, { size: 9, color: rgb(0.4, 0.4, 0.4), gap: 26 });
+
+      line('INVOICE', { size: 14, bold: true, gap: 20 });
+      line(`Ref: ${summary.deviceLocalId} (pending sync — not a final invoice number)`, { size: 9, color: rgb(0.5, 0.2, 0.05), gap: 16 });
+      line(`Date: ${new Date(summary.createdAt).toLocaleString('en-IN')}`, { size: 10, gap: 22 });
+
+      line(`Bill to: ${summary.customerName}`, { bold: true, gap: 16 });
+      if (summary.customerPhone) line(summary.customerPhone, { size: 10, color: rgb(0.4, 0.4, 0.4), gap: 22 });
+      else y -= 6;
+
+      // Line items table
+      line('Description', { bold: true, size: 10 });
+      page.drawText('Qty', { x: 330, y: y + 18, size: 10, font: bold });
+      page.drawText('Rate', { x: 400, y: y + 18, size: 10, font: bold });
+      page.drawText('Amount', { x: 480, y: y + 18, size: 10, font: bold });
+      y -= 6;
+      page.drawLine({ start: { x: margin, y }, end: { x: 555, y }, thickness: 0.5, color: rgb(0.7, 0.7, 0.7) });
+      y -= 14;
+
+      for (const li of summary.lineItems) {
+        page.drawText(String(li.description).slice(0, 40), { x: margin, y, size: 10, font });
+        page.drawText(String(li.quantity), { x: 330, y, size: 10, font });
+        page.drawText(formatCurrencyPlain(li.unit_price), { x: 400, y, size: 10, font });
+        page.drawText(formatCurrencyPlain(li.line_total), { x: 480, y, size: 10, font });
+        y -= 16;
+      }
+
+      y -= 10;
+      page.drawLine({ start: { x: 330, y }, end: { x: 555, y }, thickness: 0.5, color: rgb(0.7, 0.7, 0.7) });
+      y -= 16;
+
+      const totalsRow = (label, value, opts = {}) => {
+        page.drawText(label, { x: 400, y, size: opts.size ?? 10, font: opts.bold ? bold : font });
+        page.drawText(formatCurrencyPlain(value), { x: 480, y, size: opts.size ?? 10, font: opts.bold ? bold : font });
+        y -= 16;
+      };
+      totalsRow('Subtotal', summary.subtotal);
+      if (summary.discount) totalsRow('Discount', -summary.discount);
+      if (summary.tax) totalsRow('Tax', summary.tax);
+      totalsRow('Total', summary.total, { bold: true, size: 12 });
+      totalsRow('Paid via', summary.paymentMethod === 'credit' ? 'Credit (owed)' : summary.paymentMethod, {});
+
+      y -= 20;
+      line(INVOICE_BUSINESS_PROFILE.terms, { size: 9, color: rgb(0.4, 0.4, 0.4), gap: 14 });
+      line(INVOICE_BUSINESS_PROFILE.footer, { size: 9, color: rgb(0.4, 0.4, 0.4) });
+
+      return doc.save();
+    },
+
+    // Generic Share Sheet — Web Share API with a real File, per the
+    // "Android Share Sheet, not a custom share UI" decision. The user picks
+    // WhatsApp/Telegram/Email/Drive/Nearby Share themselves from the sheet;
+    // if they pick WhatsApp here, the PDF attaches automatically (unlike
+    // the wa.me link below, which can only pre-fill text, not attach a file
+    // — that's a real platform limitation, not a build gap).
+    async shareInvoicePdf() {
+      if (!this.billSavedSummary) return;
+      const bytes = await this.buildInvoicePdfBytes(this.billSavedSummary);
+      const filename = `invoice-${this.billSavedSummary.deviceLocalId}.pdf`;
+      const file = new File([bytes], filename, { type: 'application/pdf' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Invoice',
+            text: `Invoice for ${this.billSavedSummary.customerName}`,
+          });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // user cancelled the sheet, not an error
+          // fall through to download fallback below
+        }
+      }
+
+      // Fallback for browsers/devices without file-capable Web Share
+      // (e.g. testing on desktop Chrome) — download instead of failing
+      // silently, so the PDF is still usable.
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    // Zero-cost wa.me deep link (PRD §6.7's "zero-cost middle ground"),
+    // separate from the Share Sheet above — this can only pre-fill a text
+    // message, it cannot attach the PDF (no such capability in the wa.me
+    // URL scheme), so it's offered as a one-tap *messaging* shortcut
+    // alongside the Share Sheet, not a replacement for it.
+    //
+    // Country-code handling: the PRD doesn't specify this, so as a
+    // documented assumption (flagged in BUILD_PROGRESS.md Blockers) a bare
+    // 10-digit number is treated as an Indian mobile number and prefixed
+    // with 91. Numbers already carrying a country code (11+ digits) are
+    // left as-is.
+    whatsappShareUrl() {
+      const phone = this.billSavedSummary && this.billSavedSummary.customerPhone;
+      if (!phone) return null;
+      const digits = String(phone).replace(/\D/g, '');
+      if (!digits) return null;
+      const withCountryCode = digits.length === 10 ? `91${digits}` : digits;
+      const text = encodeURIComponent(
+        `Hi ${this.billSavedSummary.customerName}, your invoice total is ${formatCurrencyPlain(this.billSavedSummary.total)}. Thank you!`
+      );
+      return `https://wa.me/${withCountryCode}?text=${text}`;
     },
 
     // ---- Jobs / Job Card methods (Phase 0 task 6) ----
