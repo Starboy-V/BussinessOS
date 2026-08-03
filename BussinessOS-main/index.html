@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>BusinessOS</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#C2410C" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div id="app" x-data="app()" x-init="init()">
+
+    <template x-if="showFirstRunPrompt">
+      <div class="first-run-overlay">
+        <div class="first-run-card">
+          <h2 class="first-run-title">Set up BusinessOS</h2>
+          <p class="first-run-note">
+            No data found on this device yet. If you're reinstalling after replacing
+            a phone, restore your backup file below. Otherwise, start fresh.
+          </p>
+          <input type="file" accept="application/json" x-ref="firstRunFileInput"
+                 style="display:none" @change="onFirstRunRestoreSelected($event)" />
+          <button class="btn-primary" :disabled="firstRunBusy" @click="$refs.firstRunFileInput.click()">
+            Restore from Backup File
+          </button>
+          <button class="btn-secondary" :disabled="firstRunBusy" @click="dismissFirstRunStartFresh()">
+            Start Fresh
+          </button>
+          <p class="first-run-message" x-show="firstRunMessage" x-text="firstRunMessage"></p>
+        </div>
+      </div>
+    </template>
+
+    <header class="topbar">
+      <span class="topbar-title" x-text="screenTitle"></span>
+    </header>
+
+    <main class="content">
+      <template x-if="screen === 'home'">
+        <div class="dashboard">
+          <template x-if="lowStockItems.length > 0">
+            <div class="alert-banner">
+              ⚠ Low stock: <span x-text="lowStockItems.length"></span>
+              <span x-text="lowStockItems.length === 1 ? 'item' : 'items'"></span>
+            </div>
+          </template>
+
+          <div class="metric-grid">
+            <div class="metric-card">
+              <span class="metric-label">Revenue</span>
+              <span class="metric-value" x-text="formatCurrency(todayRevenue)"></span>
+            </div>
+            <div class="metric-card" :class="{ 'metric-card--negative': todayProfit < 0 }">
+              <span class="metric-label">Profit</span>
+              <span class="metric-value" x-text="formatCurrency(todayProfit)"></span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Expenses</span>
+              <span class="metric-value" x-text="formatCurrency(todayExpenses)"></span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Jobs pending</span>
+              <span class="metric-value" x-text="jobsPendingCount"></span>
+            </div>
+          </div>
+
+          <template x-if="!dashboardLoading && todayRevenue === 0 && todayExpenses === 0 && jobsPendingCount === 0 && lowStockItems.length === 0">
+            <p class="dashboard-empty">No activity yet today — these numbers update as jobs and bills come in.</p>
+          </template>
+        </div>
+      </template>
+      <template x-if="screen === 'jobs'">
+        <div class="jobs-screen">
+
+          <template x-if="jobsView === 'list'">
+            <div class="jobs-list-view">
+              <div class="jobs-header-row">
+                <span class="bill-section-title">All Jobs</span>
+                <button class="btn-primary" @click="startNewJob()">+ New Job</button>
+              </div>
+
+              <template x-if="!jobsListLoading && jobsList.length === 0">
+                <p class="dashboard-empty">No jobs yet — tap "+ New Job" to create the first one.</p>
+              </template>
+
+              <ul class="jobs-list" x-show="jobsList.length > 0">
+                <template x-for="entry in jobsList" :key="entry.job.id">
+                  <li class="job-list-item" @click="openJobDetail(entry.job.id)">
+                    <div class="job-list-item-main">
+                      <strong x-text="entry.vehicleNumber || entry.customerName"></strong>
+                      <span class="job-status-badge" :class="'job-status-badge--' + entry.job.status"
+                            x-text="jobStatusLabel(entry.job.status)"></span>
+                    </div>
+                    <div class="job-list-item-sub">
+                      <span x-show="entry.vehicleNumber" x-text="entry.customerName"></span>
+                      <span x-text="entry.job.complaint || 'No complaint noted'"></span>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+
+          <template x-if="jobsView === 'newJob'">
+            <div class="jobs-list-view">
+              <div class="jobs-header-row">
+                <button class="btn-link" @click="jobsView = 'list'">← Cancel</button>
+                <span class="bill-section-title">New Job</span>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Customer</h2>
+                <template x-if="!jobSelectedCustomer">
+                  <div>
+                    <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                           x-model="jobCustomerQuery" @input="searchJobCustomer()" />
+                    <template x-if="jobCustomerResults.length > 0">
+                      <ul class="bill-result-list">
+                        <template x-for="r in jobCustomerResults" :key="r.customer.id">
+                          <li class="bill-result-item" @click="selectJobCustomer(r)">
+                            <span x-text="r.customer.name"></span>
+                            <span class="bill-result-sub"
+                                  x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </template>
+                    <button class="btn-secondary" @click="jobNewCustomerMode = !jobNewCustomerMode">+ New Customer</button>
+                    <template x-if="jobNewCustomerMode">
+                      <div class="bill-inline-form">
+                        <input class="bill-input" type="text" placeholder="Name" x-model="jobNewCustomerName" />
+                        <input class="bill-input" type="tel" placeholder="Phone" x-model="jobNewCustomerPhone" />
+                        <button class="btn-primary" @click="saveNewJobCustomer()">Save Customer</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="jobSelectedCustomer">
+                  <div class="bill-selected-customer">
+                    <div>
+                      <strong x-text="jobSelectedCustomer.name"></strong><br />
+                      <span class="bill-result-sub" x-text="jobSelectedCustomer.phone || ''"></span>
+                    </div>
+                    <button class="btn-link" @click="changeJobCustomer()">Change</button>
+                  </div>
+                </template>
+              </section>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Vehicle <span class="bill-optional">(optional)</span></h2>
+                  <template x-if="jobVehicleResults.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="v in jobVehicleResults" :key="v.id">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': jobSelectedVehicle && jobSelectedVehicle.id === v.id }"
+                                @click="jobSelectedVehicle = v">
+                          <span x-text="v.vehicle_number"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <button class="btn-secondary" @click="jobNewVehicleMode = !jobNewVehicleMode">+ New Vehicle</button>
+                  <template x-if="jobNewVehicleMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Plate number" x-model="jobNewVehicleNumber" />
+                      <input class="bill-input" type="text" placeholder="Brand (optional)" x-model="jobNewVehicleBrand" />
+                      <input class="bill-input" type="text" placeholder="Model (optional)" x-model="jobNewVehicleModel" />
+                      <button class="btn-primary" @click="saveNewJobVehicle()">Save Vehicle</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Complaint</h2>
+                  <textarea class="bill-input" rows="3" placeholder="What's wrong with the vehicle?"
+                            x-model="jobComplaint"></textarea>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Mechanic <span class="bill-optional">(optional)</span></h2>
+                  <input class="bill-input" type="text" list="mechanic-suggestions-new" placeholder="Assign a mechanic"
+                         x-model="jobMechanicInput" />
+                  <datalist id="mechanic-suggestions-new">
+                    <template x-for="m in mechanicSuggestions" :key="m">
+                      <option :value="m"></option>
+                    </template>
+                  </datalist>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <button class="btn-primary btn-full" :disabled="jobSaving" @click="saveNewJob()">
+                  <span x-text="jobSaving ? 'Saving…' : 'Create Job'"></span>
+                </button>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="jobsView === 'detail' && selectedJob">
+            <div class="job-detail-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="backToJobsList()">←</button>
+                <div>
+                  <div class="job-detail-title" x-text="'Job #' + selectedJobDisplayNumber"></div>
+                  <div class="job-detail-subtitle">
+                    <span x-show="selectedJobVehicle"
+                          x-text="selectedJobVehicle ? (selectedJobVehicle.vehicle_number + (selectedJobVehicle.brand ? ' · ' + selectedJobVehicle.brand : '') + (selectedJobVehicle.model ? ' ' + selectedJobVehicle.model : '')) : ''"></span>
+                    <span x-show="!selectedJobVehicle" x-text="selectedJobCustomer ? selectedJobCustomer.name : ''"></span>
+                  </div>
+                </div>
+              </div>
+
+              <section class="bill-section">
+                <div class="status-stepper">
+                  <template x-for="(step, i) in ['pending','in_progress','completed','delivered']" :key="step">
+                    <div class="status-step-wrap">
+                      <div class="status-step" :class="'status-step--' + jobStatusStepState(selectedJob.status, step)">
+                        <span class="status-step-dot"></span>
+                        <span class="status-step-label" x-text="jobStatusLabel(step)"></span>
+                      </div>
+                      <div class="status-step-connector" x-show="i < 3"></div>
+                    </div>
+                  </template>
+                </div>
+
+                <template x-if="selectedJob.status === 'cancelled'">
+                  <p class="job-cancelled-note">This job was cancelled.</p>
+                </template>
+
+                <template x-if="jobNextStatus">
+                  <button class="btn-primary btn-full" @click="advanceJobStatus()">
+                    <span x-text="'Mark as ' + jobStatusLabel(jobNextStatus)"></span>
+                  </button>
+                </template>
+
+                <template x-if="selectedJob.status !== 'delivered' && selectedJob.status !== 'cancelled'">
+                  <button class="btn-link job-cancel-link" @click="cancelJob()">Cancel job</button>
+                </template>
+              </section>
+
+              <template x-if="selectedJob.complaint">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Complaint</h2>
+                  <p class="job-complaint-text" x-text="selectedJob.complaint"></p>
+                </section>
+              </template>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Intake photos (<span x-text="selectedJobIntakePhotos.length"></span>)</h2>
+                <div class="photo-grid">
+                  <template x-for="p in selectedJobIntakePhotos" :key="p.id">
+                    <img class="photo-thumb" :src="p.url" alt="Intake photo" />
+                  </template>
+                  <button class="photo-add-btn" @click="$refs.intakePhotoInput.click()">+</button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" x-ref="intakePhotoInput" style="display:none"
+                       @change="onPhotoSelected($event, 'intake')" />
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Completion photos (<span x-text="selectedJobCompletionPhotos.length"></span>)</h2>
+                <div class="photo-grid">
+                  <template x-for="p in selectedJobCompletionPhotos" :key="p.id">
+                    <img class="photo-thumb" :src="p.url" alt="Completion photo" />
+                  </template>
+                  <button class="photo-add-btn" @click="$refs.completionPhotoInput.click()">+</button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" x-ref="completionPhotoInput" style="display:none"
+                       @change="onPhotoSelected($event, 'completion')" />
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Mechanic</h2>
+                <input class="bill-input" type="text" list="mechanic-suggestions-detail" placeholder="Assign a mechanic"
+                       x-model="jobMechanicInput" @change="updateJobMechanic()" />
+                <datalist id="mechanic-suggestions-detail">
+                  <template x-for="m in mechanicSuggestions" :key="m">
+                    <option :value="m"></option>
+                  </template>
+                </datalist>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Notes</h2>
+                <ul class="job-notes-list" x-show="jobNotesList.length > 0">
+                  <template x-for="(n, i) in jobNotesList" :key="i">
+                    <li class="job-note-item" x-text="n"></li>
+                  </template>
+                </ul>
+                <template x-if="!jobAddNoteMode">
+                  <button class="btn-secondary" @click="jobAddNoteMode = true">+ Add Note</button>
+                </template>
+                <template x-if="jobAddNoteMode">
+                  <div class="bill-inline-form">
+                    <textarea class="bill-input" rows="2" placeholder="Note" x-model="jobNewNoteText"></textarea>
+                    <button class="btn-primary" @click="addJobNote()">Save Note</button>
+                  </div>
+                </template>
+              </section>
+            </div>
+          </template>
+
+        </div>
+      </template>
+      <template x-if="screen === 'bill'">
+        <div class="bill-screen">
+
+          <template x-if="billSavedSummary">
+            <div class="bill-saved">
+              <p class="bill-saved-title">Bill saved ✓</p>
+              <p class="bill-saved-detail">
+                <span x-text="formatCurrency(billSavedSummary.total)"></span> —
+                <span x-text="billSavedSummary.customerName"></span>
+              </p>
+              <p class="bill-saved-note">
+                Saved locally as <span x-text="billSavedSummary.deviceLocalId"></span> —
+                invoice number is assigned once this syncs.
+              </p>
+              <div class="bill-saved-actions">
+                <button class="btn-primary" @click="shareInvoicePdf()">Share Invoice PDF</button>
+                <a class="btn-secondary" x-show="whatsappShareUrl()" :href="whatsappShareUrl()"
+                   target="_blank" rel="noopener">Message on WhatsApp</a>
+              </div>
+              <button class="btn-secondary" @click="startNewBill()">+ New Bill</button>
+            </div>
+          </template>
+
+          <template x-if="!billSavedSummary">
+            <div class="bill-screen">
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Customer</h2>
+                <template x-if="!billSelectedCustomer">
+                  <div>
+                    <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                           x-model="billCustomerQuery" @input="searchBillCustomer()" />
+                    <template x-if="billCustomerResults.length > 0">
+                      <ul class="bill-result-list">
+                        <template x-for="r in billCustomerResults" :key="r.customer.id">
+                          <li class="bill-result-item" @click="selectBillCustomer(r)">
+                            <span x-text="r.customer.name"></span>
+                            <span class="bill-result-sub"
+                                  x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </template>
+                    <button class="btn-secondary" @click="billNewCustomerMode = !billNewCustomerMode">+ New Customer</button>
+                    <template x-if="billNewCustomerMode">
+                      <div class="bill-inline-form">
+                        <input class="bill-input" type="text" placeholder="Name" x-model="billNewCustomerName" />
+                        <input class="bill-input" type="tel" placeholder="Phone" x-model="billNewCustomerPhone" />
+                        <button class="btn-primary" @click="saveNewBillCustomer()">Save Customer</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="billSelectedCustomer">
+                  <div class="bill-selected-customer">
+                    <div>
+                      <strong x-text="billSelectedCustomer.name"></strong><br />
+                      <span class="bill-result-sub" x-text="billSelectedCustomer.phone || ''"></span>
+                    </div>
+                    <button class="btn-link" @click="changeBillCustomer()">Change</button>
+                  </div>
+                </template>
+              </section>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Vehicle <span class="bill-optional">(optional)</span></h2>
+                  <template x-if="billVehicleResults.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="v in billVehicleResults" :key="v.id">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': billSelectedVehicle && billSelectedVehicle.id === v.id }"
+                                @click="billSelectedVehicle = v">
+                          <span x-text="v.vehicle_number"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <button class="btn-secondary" @click="billNewVehicleMode = !billNewVehicleMode">+ New Vehicle</button>
+                  <template x-if="billNewVehicleMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Plate number" x-model="billNewVehicleNumber" />
+                      <input class="bill-input" type="text" placeholder="Brand (optional)" x-model="billNewVehicleBrand" />
+                      <input class="bill-input" type="text" placeholder="Model (optional)" x-model="billNewVehicleModel" />
+                      <button class="btn-primary" @click="saveNewBillVehicle()">Save Vehicle</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Quick services</h2>
+                  <div class="bill-chip-row">
+                    <template x-for="s in billServiceCatalog" :key="s.id">
+                      <button class="bill-chip" @click="addServiceToBill(s)">
+                        <span x-text="s.name"></span>
+                        <span class="bill-chip-price" x-text="formatCurrency(s.price)"></span>
+                      </button>
+                    </template>
+                    <button class="bill-chip bill-chip--custom" @click="billCustomMode = !billCustomMode">+ Custom</button>
+                  </div>
+                  <template x-if="billCustomMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Description" x-model="billCustomDescription" />
+                      <input class="bill-input" type="number" placeholder="Price" x-model="billCustomPrice" />
+                      <label class="bill-checkbox-label">
+                        <input type="checkbox" x-model="billCustomSaveToCatalog" /> Save to catalog for next time
+                      </label>
+                      <button class="btn-primary" @click="addCustomLineItem()">Add</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Parts</h2>
+                  <template x-if="billInventoryItems.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="p in billInventoryItems" :key="p.id">
+                        <button class="bill-chip" @click="addPartToBill(p)">
+                          <span x-text="p.name"></span>
+                          <span class="bill-chip-price" x-text="formatCurrency(p.selling_price)"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="billInventoryItems.length === 0">
+                    <p class="bill-empty-note">No inventory items yet — add stock once the Inventory screen is built, or add this part as a custom line item above.</p>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="billLineItems.length > 0">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Bill items</h2>
+                  <ul class="bill-line-items">
+                    <template x-for="li in billLineItems" :key="li.id">
+                      <li class="bill-line-item">
+                        <div class="bill-line-item-main">
+                          <span x-text="li.description"></span>
+                          <span class="bill-line-item-price" x-text="formatCurrency(li.quantity * li.unit_price)"></span>
+                        </div>
+                        <div class="bill-line-item-controls">
+                          <button class="qty-btn" @click="decrementLineItem(li.id)">−</button>
+                          <span x-text="li.quantity"></span>
+                          <button class="qty-btn" @click="incrementLineItem(li.id)">+</button>
+                          <button class="btn-link bill-remove" @click="removeBillLineItem(li.id)">Remove</button>
+                        </div>
+                      </li>
+                    </template>
+                  </ul>
+                </section>
+              </template>
+
+              <template x-if="billLineItems.length > 0">
+                <section class="bill-section">
+                  <div class="bill-adjust-row">
+                    <label>Discount <input class="bill-input bill-input--small" type="number" x-model="billDiscount" /></label>
+                    <label>Tax <input class="bill-input bill-input--small" type="number" x-model="billTax" /></label>
+                  </div>
+                  <div class="bill-total-row">
+                    <span>Total</span>
+                    <span class="bill-total-value" x-text="formatCurrency(billTotal)"></span>
+                  </div>
+                  <div class="bill-payment-row">
+                    <span class="bill-section-title">Payment</span>
+                    <div class="bill-chip-row">
+                      <template x-for="m in ['cash','upi','card','credit']" :key="m">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': billPaymentMethod === m }"
+                                @click="billPaymentMethod = m">
+                          <span x-text="m === 'upi' ? 'UPI' : m.charAt(0).toUpperCase() + m.slice(1)"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                  <button class="btn-primary btn-full" :disabled="billSaving" @click="saveBill()">
+                    <span x-text="billSaving ? 'Saving…' : 'Save Bill'"></span>
+                  </button>
+                </section>
+              </template>
+
+            </div>
+          </template>
+
+        </div>
+      </template>
+      <template x-if="screen === 'inventory'">
+        <div class="jobs-list-view">
+          <div class="jobs-header-row">
+            <span class="bill-section-title">Local Stock</span>
+            <button class="btn-primary" @click="startAddInventoryItem()">+ New Item</button>
+          </div>
+
+          <template x-if="inventoryAddMode">
+            <section class="bill-section">
+              <h2 class="bill-section-title">New Item</h2>
+              <div class="bill-inline-form">
+                <input class="bill-input" type="text" placeholder="Item name" x-model="inventoryNewName" />
+                <input class="bill-input" type="text" placeholder="Category (optional)" x-model="inventoryNewCategory" />
+                <input class="bill-input" type="number" placeholder="Buying price" x-model="inventoryNewBuyingPrice" />
+                <input class="bill-input" type="number" placeholder="Selling price" x-model="inventoryNewSellingPrice" />
+                <input class="bill-input" type="number" placeholder="Low-stock alert level" x-model="inventoryNewMinStock" />
+                <div class="bill-adjust-row">
+                  <button class="btn-link" @click="inventoryAddMode = false">Cancel</button>
+                  <button class="btn-primary" :disabled="inventorySaving" @click="saveNewInventoryItem()">Save Item</button>
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <template x-if="!inventoryLoading && inventoryItems.length === 0 && !inventoryAddMode">
+            <p class="dashboard-empty">No inventory items yet — tap "+ New Item" to add the first one.</p>
+          </template>
+
+          <ul class="jobs-list" x-show="inventoryItems.length > 0">
+            <template x-for="item in inventoryItems" :key="item.id">
+              <li class="job-list-item" :class="{ 'inventory-item--negative': item.current_stock < 0 }"
+                  @click="toggleInventoryPurchase(item.id)">
+                <div class="job-list-item-main">
+                  <strong x-text="item.name"></strong>
+                  <span class="inventory-stock-badge"
+                        :class="{
+                          'inventory-stock-badge--negative': item.current_stock < 0,
+                          'inventory-stock-badge--low': item.current_stock >= 0 && item.current_stock <= item.min_stock
+                        }"
+                        x-text="item.current_stock"></span>
+                </div>
+                <div class="job-list-item-sub">
+                  <span x-text="item.category || 'Uncategorized'"></span>
+                  <span x-text="'Buy ' + formatCurrency(item.buying_price) + ' · Sell ' + formatCurrency(item.selling_price)"></span>
+                  <span x-show="item.current_stock < 0" class="inventory-negative-note">Negative stock — sold more than recorded on hand</span>
+                  <span x-show="item.current_stock >= 0 && item.current_stock <= item.min_stock" class="inventory-low-note">
+                    Low stock (min <span x-text="item.min_stock"></span>)
+                  </span>
+                </div>
+
+                <template x-if="inventoryPurchaseItemId === item.id">
+                  <div class="bill-inline-form" @click.stop>
+                    <span class="bill-result-sub">Record a purchase — increases stock and logs an expense automatically</span>
+                    <input class="bill-input" type="number" placeholder="Quantity received" x-model="inventoryPurchaseQty" />
+                    <input class="bill-input" type="number" placeholder="Unit cost (optional)" x-model="inventoryPurchaseUnitCost" />
+                    <input class="bill-input" type="text" placeholder="Paid to / supplier (optional)" x-model="inventoryPurchasePaidTo" />
+                    <div class="bill-adjust-row">
+                      <button class="btn-link" @click.stop="toggleInventoryPurchase(item.id)">Cancel</button>
+                      <button class="btn-primary" :disabled="inventorySaving" @click.stop="recordPurchase()">Record Purchase</button>
+                    </div>
+                  </div>
+                </template>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </template>
+      <template x-if="screen === 'more'">
+        <div class="more-screen">
+
+          <template x-if="moreView === 'search'">
+            <div class="jobs-list-view">
+              <button class="btn-secondary more-settings-link" @click="openSettingsScreen()">⚙ Settings</button>
+              <span class="bill-section-title">Find Customer / Vehicle</span>
+              <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                     x-model="customerSearchQuery" @input="searchCustomerProfile()" />
+
+              <template x-if="customerSearchQuery.trim() && customerSearchResults.length === 0">
+                <p class="dashboard-empty">No matches — try a different name, phone, or plate.</p>
+              </template>
+
+              <ul class="bill-result-list" x-show="customerSearchResults.length > 0">
+                <template x-for="r in customerSearchResults" :key="r.customer.id">
+                  <li class="bill-result-item" @click="openCustomerProfile(r.customer.id)">
+                    <span x-text="r.customer.name"></span>
+                    <span class="bill-result-sub"
+                          x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                  </li>
+                </template>
+              </ul>
+
+              <template x-if="!customerSearchQuery.trim()">
+                <p class="dashboard-empty">Search by plate number, phone, or name to see a customer's full history — vehicles, jobs, invoices, and payments in one place.</p>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="moreView === 'profile' && profileCustomer">
+            <div class="jobs-list-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="backToCustomerSearch()">←</button>
+                <div>
+                  <div class="job-detail-title" x-text="profileCustomer.name"></div>
+                  <div class="job-detail-subtitle" x-text="profileCustomer.phone || 'No phone on file'"></div>
+                </div>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Vehicles</h2>
+                <template x-if="profileVehicles.length === 0">
+                  <p class="bill-empty-note">No vehicles on file for this customer.</p>
+                </template>
+                <ul class="bill-result-list" x-show="profileVehicles.length > 0">
+                  <template x-for="v in profileVehicles" :key="v.id">
+                    <li class="bill-result-item">
+                      <span x-text="v.vehicle_number"></span>
+                      <span class="bill-result-sub" x-text="[v.brand, v.model].filter(Boolean).join(' ') || 'No make/model on file'"></span>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Jobs</h2>
+                <template x-if="profileJobs.length === 0">
+                  <p class="bill-empty-note">No jobs yet for this customer.</p>
+                </template>
+                <ul class="jobs-list" x-show="profileJobs.length > 0">
+                  <template x-for="j in profileJobs" :key="j.id">
+                    <li class="job-list-item" @click="openJobFromProfile(j.id)">
+                      <div class="job-list-item-main">
+                        <strong x-text="profileVehicleNumber(j.vehicle_id) || 'No vehicle'"></strong>
+                        <span class="job-status-badge" :class="'job-status-badge--' + j.status"
+                              x-text="jobStatusLabel(j.status)"></span>
+                      </div>
+                      <div class="job-list-item-sub">
+                        <span x-text="j.complaint || 'No complaint noted'"></span>
+                        <span x-text="new Date(j.created_at).toLocaleDateString('en-IN')"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Invoices &amp; Payments</h2>
+                <template x-if="profileInvoices.length === 0">
+                  <p class="bill-empty-note">No invoices yet for this customer.</p>
+                </template>
+                <ul class="bill-line-items" x-show="profileInvoices.length > 0">
+                  <template x-for="entry in profileInvoices" :key="entry.invoice.id">
+                    <li class="bill-line-item">
+                      <div class="bill-line-item-main">
+                        <span x-text="entry.invoice.invoice_number ? ('Invoice ' + entry.invoice.invoice_number) : 'Invoice pending sync'"></span>
+                        <span class="bill-line-item-price" x-text="formatCurrency(entry.invoice.total)"></span>
+                      </div>
+                      <div class="job-list-item-sub">
+                        <span x-text="new Date(entry.invoice.created_at).toLocaleDateString('en-IN')"></span>
+                        <span x-text="invoiceStatusLabel(entry.invoice.status) + (entry.payments.length ? ' · ' + entry.payments.map(p => p.method).join(', ') : '')"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+            </div>
+          </template>
+
+          <template x-if="moreView === 'settings'">
+            <div class="jobs-list-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="moreView = 'search'">←</button>
+                <div class="job-detail-title">Settings</div>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Backup</h2>
+                <p class="bill-empty-note">
+                  Export all your data (customers, jobs, invoices, inventory — everything)
+                  as one file. Works fully offline. Keep it somewhere safe (Drive, email to yourself, etc.).
+                </p>
+                <button class="btn-primary" :disabled="backupBusy" @click="exportBackup()">
+                  <span x-show="!backupBusy">Export Backup</span>
+                  <span x-show="backupBusy">Exporting…</span>
+                </button>
+                <p class="bill-saved-note" x-show="backupMessage" x-text="backupMessage"></p>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Restore</h2>
+                <p class="bill-empty-note">
+                  Restoring replaces ALL current data on this device with the backup file.
+                  Use this after reinstalling, or to recover from a lost device.
+                </p>
+                <input type="file" accept="application/json" x-ref="restoreFileInput"
+                       style="display:none" @change="onSettingsRestoreSelected($event)" />
+                <button class="btn-secondary" :disabled="restoreBusy" @click="triggerRestoreFilePicker()">
+                  <span x-show="!restoreBusy">Restore from Backup File</span>
+                  <span x-show="restoreBusy">Restoring…</span>
+                </button>
+                <p class="bill-saved-note" x-show="restoreMessage" x-text="restoreMessage"></p>
+              </section>
+            </div>
+          </template>
+
+        </div>
+      </template>
+    </main>
+
+    <nav class="bottom-nav">
+      <button :class="{active: screen === 'home'}" @click="go('home')">
+        <span class="nav-icon">⌂</span><span class="nav-label">Home</span>
+      </button>
+      <button :class="{active: screen === 'jobs'}" @click="go('jobs')">
+        <span class="nav-icon">📋</span><span class="nav-label">Jobs</span>
+      </button>
+      <button :class="{active: screen === 'bill'}" @click="go('bill')">
+        <span class="nav-icon">➕</span><span class="nav-label">Bill</span>
+      </button>
+      <button :class="{active: screen === 'inventory'}" @click="go('inventory')">
+        <span class="nav-icon">📦</span><span class="nav-label">Inventory</span>
+      </button>
+      <button :class="{active: screen === 'more'}" @click="go('more')">
+        <span class="nav-icon">⋯</span><span class="nav-label">More</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW registration failed', err));
+      });
+    }
+  </script>
+</body>
+</html>
