@@ -42,6 +42,78 @@ function hexToRgb01(hex) {
   return { r, g, b };
 }
 
+// Phase 0 task 12 (PRD §3 Phase 1 table / §7): resize to <=1600px on the
+// longest edge, JPEG ~70% quality, target <300KB/photo. "Target" (not a hard
+// ceiling per the PRD wording), so this makes one extra quality-lowering
+// pass if the first pass is still oversized rather than looping indefinitely
+// chasing an exact byte count. Canvas-only, no library, per the PRD's own
+// note that this doesn't need one (unlike the pdf-lib PDF task).
+//
+// Returns a base64 data: URI string, NOT a Blob — job_photos.url is read
+// directly as an <img :src> AND is walked into Settings' JSON backup export
+// (exportBackup() does JSON.stringify(payload) over every table's toArray()
+// result). A Blob would serialize to "{}" in that JSON and silently corrupt
+// every photo in a backup, so the data-URI-string format from before this
+// task is preserved on purpose, not just left as-is by accident.
+const PHOTO_MAX_DIMENSION_PX = 1600;
+const PHOTO_TARGET_BYTES = 300 * 1024;
+const PHOTO_JPEG_QUALITY = 0.7;
+const PHOTO_JPEG_QUALITY_FALLBACK = 0.5;
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(err);
+    };
+    img.src = objectUrl;
+  });
+}
+
+function canvasToJpegBlob(canvas, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('toBlob returned null'))),
+      'image/jpeg',
+      quality
+    );
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function compressPhotoFile(file) {
+  const img = await loadImageFromFile(file);
+  const longestEdge = Math.max(img.naturalWidth, img.naturalHeight);
+  const scale = longestEdge > PHOTO_MAX_DIMENSION_PX ? PHOTO_MAX_DIMENSION_PX / longestEdge : 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  let blob = await canvasToJpegBlob(canvas, PHOTO_JPEG_QUALITY);
+  if (blob.size > PHOTO_TARGET_BYTES) {
+    // One extra pass at a lower quality — "target," not guaranteed; not
+    // worth an unbounded binary-search loop for a Phase 0 pilot.
+    blob = await canvasToJpegBlob(canvas, PHOTO_JPEG_QUALITY_FALLBACK);
+  }
+  return blobToDataUrl(blob);
+}
+
 // Phase 0 task 10/11 (PRD §6.13): must match js/db.js's db.version(1).stores()
 // keys exactly, or a backup silently misses a table. Kept as one explicit
 // list, checked against js/db.js by hand, rather than trying to introspect
@@ -1192,29 +1264,37 @@ function app() {
       this.selectedJob = { ...this.selectedJob, ...updatedFields };
     },
 
-    // Stored as a raw base64 data URI, uncompressed — client-side
-    // compression (≤1600px longest edge, JPEG ~70%, <300KB target) is its
-    // own later checklist item, deliberately not built here. Camera
-    // permission denied / picker cancelled just means no file arrives —
-    // nothing here blocks job creation or the rest of the Job Card on it,
-    // per §6.5's edge case.
-    onPhotoSelected(event, stage) {
+    // Task 12 (PRD §3/§7): compressed via compressPhotoFile() — resized to
+    // <=1600px longest edge, re-encoded as JPEG ~70% quality — before the
+    // Dexie write, so nothing is ever stored uncompressed from this point
+    // forward. If compression itself throws (e.g. a non-image file, or a
+    // very old browser missing canvas.toBlob), falls back to storing the
+    // original file uncompressed rather than silently dropping the photo —
+    // per §6.5's edge case that a photo-capture hiccup must never block job
+    // creation or the rest of the Job Card. Camera permission denied /
+    // picker cancelled still just means no file arrives, same as before.
+    async onPhotoSelected(event, stage) {
       const file = event.target.files && event.target.files[0];
       event.target.value = ''; // allow re-selecting the same file again later
       if (!file || !this.selectedJob) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        await window.db.job_photos.add({
-          id: crypto.randomUUID(),
-          job_id: this.selectedJob.id,
-          url: reader.result,
-          stage,
-          uploaded_by: null,
-          created_at: new Date().toISOString(),
-        });
-        await this.refreshJobPhotos();
-      };
-      reader.readAsDataURL(file);
+
+      let dataUrl;
+      try {
+        dataUrl = await compressPhotoFile(file);
+      } catch (err) {
+        console.warn('Photo compression failed, storing original uncompressed:', err);
+        dataUrl = await blobToDataUrl(file);
+      }
+
+      await window.db.job_photos.add({
+        id: crypto.randomUUID(),
+        job_id: this.selectedJob.id,
+        url: dataUrl,
+        stage,
+        uploaded_by: null,
+        created_at: new Date().toISOString(),
+      });
+      await this.refreshJobPhotos();
     },
     async refreshJobPhotos() {
       if (!this.selectedJob) return;
