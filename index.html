@@ -18,7 +18,37 @@
 
     <main class="content">
       <template x-if="screen === 'home'">
-        <div class="placeholder-screen"><p>Home Dashboard — next build step.</p></div>
+        <div class="dashboard">
+          <template x-if="lowStockItems.length > 0">
+            <div class="alert-banner">
+              ⚠ Low stock: <span x-text="lowStockItems.length"></span>
+              <span x-text="lowStockItems.length === 1 ? 'item' : 'items'"></span>
+            </div>
+          </template>
+
+          <div class="metric-grid">
+            <div class="metric-card">
+              <span class="metric-label">Revenue</span>
+              <span class="metric-value" x-text="formatCurrency(todayRevenue)"></span>
+            </div>
+            <div class="metric-card" :class="{ 'metric-card--negative': todayProfit < 0 }">
+              <span class="metric-label">Profit</span>
+              <span class="metric-value" x-text="formatCurrency(todayProfit)"></span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Expenses</span>
+              <span class="metric-value" x-text="formatCurrency(todayExpenses)"></span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Jobs pending</span>
+              <span class="metric-value" x-text="jobsPendingCount"></span>
+            </div>
+          </div>
+
+          <template x-if="!dashboardLoading && todayRevenue === 0 && todayExpenses === 0 && jobsPendingCount === 0 && lowStockItems.length === 0">
+            <p class="dashboard-empty">No activity yet today — these numbers update as jobs and bills come in.</p>
+          </template>
+        </div>
       </template>
       <template x-if="screen === 'jobs'">
         <div class="placeholder-screen"><p>Jobs — coming soon.</p></div>

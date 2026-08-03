@@ -14,7 +14,7 @@
 |---|---|
 | **Repo** | https://github.com/Starboy-V/BussinessOS |
 | **Last updated** | 2026-08-03 |
-| **Last session ended because** | task complete, stopping point reached cleanly |
+| **Last session ended because** | task complete, stopping point reached cleanly — see Session Log |
 
 ---
 
@@ -28,7 +28,7 @@
 
 ## Next Task (start here)
 
-4. Build the Home Dashboard screen (PRD §9 wireframe, §6.10 metrics) — revenue/expense/profit cards, jobs-pending count, low-stock alert banner, reading from the Dexie tables now defined in `js/db.js`.
+5. Build the New Bill screen (PRD §9 wireframe, §6.7) — customer/vehicle search-or-create, quick-service buttons from seeded garage catalog, parts picker, discount/tax, PDF preview. Note: `service_catalog` and `inventory_items` are currently empty tables — this task will need to seed a starter garage catalog (or stub it) before quick-service buttons have anything to show; check PRD §4.1 / §6.3 for what the starter catalog should contain before inventing one.
 
 *(Whoever — or whatever session — picks this up next: do this one task, update the checklist and this "Next Task" line, commit, then stop and reassess. Don't chain multiple unrelated tasks in one uncommitted block of work.)*
 
@@ -42,7 +42,7 @@ Each box maps to a PRD section — check the section before marking done, don't 
 - [x] Dexie schema mirrors PRD §11 tables (single-business subset, no `business_id` yet): `customers`, `vehicles`, `service_catalog`, `jobs`, `job_line_items`, `job_photos`, `inventory_items`, `inventory_transactions`, `invoices`, `invoice_line_items`, `payments`, `expenses`, `expense_categories`
 - [x] Bottom nav shell — Home / Jobs / Bill / Inventory / More (PRD §8) — *shipped as part of task 1's commit, not its own; checked off here retroactively rather than leaving it stale*
 - [ ] Bottom nav shell — Home / Jobs / Bill / Inventory / More (PRD §8)
-- [ ] Home Dashboard screen (PRD §9 wireframe, §6.10 metrics)
+- [x] Home Dashboard screen (PRD §9 wireframe, §6.10 subset) — revenue/expenses/profit/jobs-pending cards + low-stock banner, reading live from Dexie; full 12-metric §6.10 set (cash/UPI split, top mechanic, etc.) deliberately deferred, not forgotten
 - [ ] New Bill screen (PRD §9 wireframe) — customer/vehicle search-or-create, quick-service buttons from seeded garage catalog, parts picker, discount/tax, PDF preview
 - [ ] Job Card screen (PRD §9 wireframe) — status stepper, photo capture (intake/completion), mechanic field, notes
 - [ ] Customer/Vehicle profile screen (PRD §6.4) — search by plate/phone/name, full history in one scroll
@@ -66,6 +66,7 @@ to "improve" something that was already deliberately decided. These are closed:
 - Auth: none in Phase 0; PIN-based in Phase 1, never SMS OTP (PRD §3, §13)
 - PDF generation: client-side, **pdf-lib**, no server round-trip
 - Multi-tenant readiness: `vehicle_id` nullable, `custom_fields jsonb` on jobs/customers — build these into the schema now even in single-business Phase 0, since retrofitting later is the expensive path (PRD §4.1)
+- Timestamp storage: **ISO 8601 strings**, not JS `Date` objects, for every date/time field written to Dexie (`created_at`, `paid_at`, `expense_date`, etc.) — set by Home Dashboard task since it was the first task to read timestamps; picked for IndexedDB structured-clone safety and because it's what the §6.13 JSON backup needs anyway. Any future task writing these fields should follow it, not invent a second format.
 
 If a task seems to require reopening one of these, stop and flag it below instead of silently deciding differently.
 
@@ -86,6 +87,9 @@ If a task seems to require reopening one of these, stop and flag it below instea
 - `js/app.js` — Alpine controller for nav/screen state
 - `js/db.js` — Dexie initialized **and schema defined** (13 tables per PRD §11, single-business subset)
 - `icons/icon-192.png`, `icons/icon-512.png` — placeholder PWA icons (see Blockers)
+- `index.html` — Home Dashboard markup added (metric grid, low-stock banner, day-1 empty state)
+- `js/app.js` — dashboard state + `loadDashboard()` reading Dexie `payments`/`expenses`/`jobs`/`inventory_items`; established the ISO-string timestamp convention (see Decisions Locked In)
+- `css/style.css` — dashboard styles (`.metric-grid`, `.metric-card`, `.alert-banner`, etc.), matching existing tokens
 
 ---
 
@@ -96,3 +100,4 @@ If a task seems to require reopening one of these, stop and flag it below instea
 - Session 0 — checkpoint file created, no code written yet.
 - Session 1 — Phase 0 task 1 complete: PWA shell scaffolded (index.html, manifest, service worker, css, Alpine app controller, Dexie stub, placeholder icons). Next: Dexie schema.
 - Session 2 — Phase 0 task 2 complete: Dexie schema defined for all 13 tables in `js/db.js`. Retroactively checked off "bottom nav shell" since it shipped inside task 1's commit. Next: Home Dashboard screen.
+- Session 3 — Phase 0 task 4 complete: Home Dashboard built (revenue/expenses/profit/jobs-pending cards, low-stock banner, day-1 empty state), reading live from Dexie. Locked in ISO-string timestamp convention for future tasks. Next: New Bill screen — will need a starter service catalog seeded first, flagged in Next Task.
