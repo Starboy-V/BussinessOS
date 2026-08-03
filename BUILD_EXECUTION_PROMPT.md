@@ -159,3 +159,29 @@ conversation, could read it and continue correctly.
 - **Small commit units** cap the cost of a bad cutoff at one task, not one
   session — this is the actual answer to "what if the limit hits mid-work,"
   not a mechanism that detects the limit, because no such detection exists.
+
+---
+
+## Precaution checklist (added after a false-alarm incident)
+
+A chat session once nearly concluded that 7 sessions of logged work had
+never actually been pushed, based on a truncated (JS-rendered) view of
+GitHub's file-tree page. The code was real. But the underlying risk this
+pointed at is real too: a session's own "pushed to origin" claim, written
+into this file, has nothing independently checking it. These rules exist so
+that gap doesn't get relied on for real next time:
+
+1. **Never trust a session's own "pushed to origin" claim at face value** —
+   verify by fetching a raw file URL
+   (`raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>`) after the
+   push and diffing it against local content, in the *same* session, before
+   ending it.
+2. **Don't paste long-lived PATs into chat.** Use a fine-grained,
+   repo-scoped token with a short expiry (a few hours), and revoke it
+   manually right after the session regardless of whether it was used.
+3. **Test network reachability first**, every session, before assuming push
+   capability exists (`curl -sD - https://github.com`). If blocked, switch
+   immediately to "generate files for manual commit" instead of guessing.
+4. **Change the Meta table** in `BUILD_PROGRESS.md` to record
+   `Push verified: yes/no (method)` instead of just a prose sentence — makes
+   the gap above impossible to miss next time.

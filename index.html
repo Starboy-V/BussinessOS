@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#C2410C" />
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -298,10 +299,15 @@
                 <span x-text="billSavedSummary.customerName"></span>
               </p>
               <p class="bill-saved-note">
-                PDF generation &amp; share isn't wired up yet — that's the next build task.
-                Saved locally as <span x-text="billSavedSummary.deviceLocalId"></span>.
+                Saved locally as <span x-text="billSavedSummary.deviceLocalId"></span> —
+                invoice number is assigned once this syncs.
               </p>
-              <button class="btn-primary" @click="startNewBill()">+ New Bill</button>
+              <div class="bill-saved-actions">
+                <button class="btn-primary" @click="shareInvoicePdf()">Share Invoice PDF</button>
+                <a class="btn-secondary" x-show="whatsappShareUrl()" :href="whatsappShareUrl()"
+                   target="_blank" rel="noopener">Message on WhatsApp</a>
+              </div>
+              <button class="btn-secondary" @click="startNewBill()">+ New Bill</button>
             </div>
           </template>
 
