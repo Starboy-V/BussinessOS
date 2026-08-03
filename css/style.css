@@ -410,6 +410,21 @@ html, body {
   margin: 0 0 12px;
 }
 
+.bill-saved-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.bill-saved-actions .btn-secondary,
+.bill-saved-actions .btn-primary {
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+}
+
 /* ---- Jobs / Job Card (Phase 0 task 6) ---- */
 
 .jobs-list-view {
@@ -700,4 +715,55 @@ html, body {
 .nav-icon {
   font-size: 20px;
   line-height: 1;
+}
+
+/* ---- Settings / Backup (Phase 0 tasks 10 & 11) ---- */
+
+.more-settings-link {
+  align-self: flex-start;
+  margin-bottom: 8px;
+  width: auto;
+}
+
+/* ---- First-run restore-or-start-fresh overlay ---- */
+
+.first-run-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.first-run-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 24px 20px;
+  max-width: 360px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.first-run-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.first-run-note {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.first-run-message {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 4px 0 0;
 }

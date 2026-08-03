@@ -42,6 +42,28 @@ function hexToRgb01(hex) {
   return { r, g, b };
 }
 
+// Phase 0 task 10/11 (PRD §6.13): must match js/db.js's db.version(1).stores()
+// keys exactly, or a backup silently misses a table. Kept as one explicit
+// list, checked against js/db.js by hand, rather than trying to introspect
+// Dexie's schema at runtime — introspection would be more "automatic" but
+// also more likely to silently include/exclude a table on a future schema
+// change without anyone noticing.
+const DB_TABLE_NAMES = [
+  'customers',
+  'vehicles',
+  'service_catalog',
+  'jobs',
+  'job_line_items',
+  'job_photos',
+  'inventory_items',
+  'inventory_transactions',
+  'invoices',
+  'invoice_line_items',
+  'payments',
+  'expenses',
+  'expense_categories',
+];
+
 function app() {
   return {
     screen: 'home',
@@ -172,13 +194,28 @@ function app() {
     // live" question flagged in BUILD_PROGRESS.md's Next Task ("customers,
     // reports, settings folded here to avoid tab overload"), so this wasn't
     // actually an open decision once §8 was re-read, just an unread one.
-    moreView: 'search', // 'search' | 'profile'
+    moreView: 'search', // 'search' | 'profile' | 'settings'
     customerSearchQuery: '',
     customerSearchResults: [], // ranked: [{ customer, matchedVehicle, rank }]
     profileCustomer: null,
     profileVehicles: [],
     profileJobs: [],
     profileInvoices: [], // [{ invoice, payments }]
+
+    // ---- Settings / Backup state (Phase 0 tasks 10 & 11, PRD §6.13) ----
+    backupBusy: false,
+    backupMessage: '', // transient status line, cleared on next action
+    restoreBusy: false,
+    restoreMessage: '',
+
+    // First-run restore prompt: shown only when local storage looks
+    // genuinely empty AND no "already set up" flag exists yet — an
+    // existing install upgrading to this version must NOT see this, so
+    // checkFirstRun() only shows it when both conditions hold, not just
+    // "flag missing" (an existing install predates this flag entirely).
+    showFirstRunPrompt: false,
+    firstRunBusy: false,
+    firstRunMessage: '',
 
     // ---- Inventory state (Phase 0 task 8, PRD §6.6) ----
     // Scope note: only "Local Stock" + purchase recording are built here.
@@ -201,7 +238,51 @@ function app() {
 
     async init() {
       console.log('BusinessOS shell initialized. DB ready:', !!window.db);
+      await this.checkFirstRun();
       await this.loadDashboard();
+    },
+
+    // PRD §6.13 edge case: "owner uninstalls and reinstalls... reinstall
+    // flow must offer Restore from backup file as a first-run option, not
+    // just start fresh." Detecting "first run" purely from an empty DB
+    // would wrongly fire for a brand-new install too (which is fine — same
+    // prompt applies) but WOULD wrongly refire for an existing install that
+    // happens to have zero customers yet (e.g. day 1, before this feature
+    // existed). The `businessos_onboarded` localStorage flag disambiguates:
+    // only show the prompt when the DB is empty AND the flag was never set,
+    // then set the flag either way so it never shows twice.
+    async checkFirstRun() {
+      if (localStorage.getItem('businessos_onboarded')) return;
+      const counts = await Promise.all(
+        DB_TABLE_NAMES.map((t) => window.db[t].count())
+      );
+      const isEmpty = counts.every((c) => c === 0);
+      if (isEmpty) {
+        this.showFirstRunPrompt = true;
+      } else {
+        // Existing install predating this flag — don't interrupt it.
+        localStorage.setItem('businessos_onboarded', '1');
+      }
+    },
+    dismissFirstRunStartFresh() {
+      localStorage.setItem('businessos_onboarded', '1');
+      this.showFirstRunPrompt = false;
+    },
+    async onFirstRunRestoreSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      this.firstRunBusy = true;
+      this.firstRunMessage = '';
+      try {
+        await this.restoreFromBackupFile(file, { skipConfirm: true });
+        localStorage.setItem('businessos_onboarded', '1');
+        this.showFirstRunPrompt = false;
+        await this.loadDashboard();
+      } catch (err) {
+        this.firstRunMessage = 'Restore failed — check this is a BusinessOS backup file. (' + (err && err.message ? err.message : 'unknown error') + ')';
+      }
+      this.firstRunBusy = false;
+      event.target.value = '';
     },
     go(screen) {
       this.screen = screen;
@@ -711,19 +792,14 @@ function app() {
     // if they pick WhatsApp here, the PDF attaches automatically (unlike
     // the wa.me link below, which can only pre-fill text, not attach a file
     // — that's a real platform limitation, not a build gap).
-    async shareInvoicePdf() {
-      if (!this.billSavedSummary) return;
-      const bytes = await this.buildInvoicePdfBytes(this.billSavedSummary);
-      const filename = `invoice-${this.billSavedSummary.deviceLocalId}.pdf`;
-      const file = new File([bytes], filename, { type: 'application/pdf' });
-
+    //
+    // Extracted as shareOrDownloadFile() (task 10) so the Backup export
+    // below reuses the exact same share-or-fallback logic instead of a
+    // second copy, per this task's own Next Task note.
+    async shareOrDownloadFile(file, shareTitle, shareText) {
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
-          await navigator.share({
-            files: [file],
-            title: 'Invoice',
-            text: `Invoice for ${this.billSavedSummary.customerName}`,
-          });
+          await navigator.share({ files: [file], title: shareTitle, text: shareText });
           return;
         } catch (err) {
           if (err && err.name === 'AbortError') return; // user cancelled the sheet, not an error
@@ -733,13 +809,21 @@ function app() {
 
       // Fallback for browsers/devices without file-capable Web Share
       // (e.g. testing on desktop Chrome) — download instead of failing
-      // silently, so the PDF is still usable.
+      // silently, so the file is still usable.
       const url = URL.createObjectURL(file);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename;
+      a.download = file.name;
       a.click();
       URL.revokeObjectURL(url);
+    },
+
+    async shareInvoicePdf() {
+      if (!this.billSavedSummary) return;
+      const bytes = await this.buildInvoicePdfBytes(this.billSavedSummary);
+      const filename = `invoice-${this.billSavedSummary.deviceLocalId}.pdf`;
+      const file = new File([bytes], filename, { type: 'application/pdf' });
+      await this.shareOrDownloadFile(file, 'Invoice', `Invoice for ${this.billSavedSummary.customerName}`);
     },
 
     // Zero-cost wa.me deep link (PRD §6.7's "zero-cost middle ground"),
@@ -763,6 +847,91 @@ function app() {
         `Hi ${this.billSavedSummary.customerName}, your invoice total is ${formatCurrencyPlain(this.billSavedSummary.total)}. Thank you!`
       );
       return `https://wa.me/${withCountryCode}?text=${text}`;
+    },
+
+    // ---- Settings / Backup (Phase 0 tasks 10 & 11, PRD §6.13) ----
+    // Combined into one session's work since export and restore share the
+    // same file format and most of the same code path — splitting them
+    // across two sessions would mean restore's format has to guess at
+    // export's, rather than being written against it directly.
+
+    openSettingsScreen() {
+      this.moreView = 'settings';
+      this.backupMessage = '';
+      this.restoreMessage = '';
+    },
+
+    // Zero-connectivity by construction — everything here is a Dexie read
+    // and a client-side file write, no network call anywhere, per §6.13's
+    // "must work with zero connectivity" rule.
+    async exportBackup() {
+      this.backupBusy = true;
+      this.backupMessage = '';
+      try {
+        const payload = { format: 'businessos-backup', version: 1, exported_at: new Date().toISOString(), tables: {} };
+        for (const t of DB_TABLE_NAMES) {
+          payload.tables[t] = await window.db[t].toArray();
+        }
+        const filename = `businessos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        const file = new File([JSON.stringify(payload)], filename, { type: 'application/json' });
+        await this.shareOrDownloadFile(file, 'BusinessOS Backup', 'BusinessOS data backup');
+        this.backupMessage = 'Backup ready — saved or shared just now.';
+      } catch (err) {
+        this.backupMessage = 'Export failed: ' + (err && err.message ? err.message : 'unknown error');
+      }
+      this.backupBusy = false;
+    },
+
+    // Shared by both Settings → Restore and the first-run prompt. Requires
+    // explicit confirmation before wiping existing data — this is the one
+    // place in the app that can destroy everything in one action, so it
+    // does NOT get the "undo toast, no confirm dialog" treatment §8 prefers
+    // for low-risk actions; this is deliberately high-risk-dialog territory.
+    async restoreFromBackupFile(file, opts = {}) {
+      const text = await file.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw new Error('not valid JSON');
+      }
+      if (!payload || payload.format !== 'businessos-backup' || !payload.tables) {
+        throw new Error('not a recognized BusinessOS backup file');
+      }
+      if (!opts.skipConfirm) {
+        const ok = window.confirm(
+          'Restoring will REPLACE all current data on this device with the backup. This cannot be undone. Continue?'
+        );
+        if (!ok) return;
+      }
+      await window.db.transaction('rw', DB_TABLE_NAMES.map((t) => window.db[t]), async () => {
+        for (const t of DB_TABLE_NAMES) {
+          await window.db[t].clear();
+          const rows = payload.tables[t];
+          if (Array.isArray(rows) && rows.length > 0) {
+            await window.db[t].bulkPut(rows);
+          }
+        }
+      });
+    },
+
+    triggerRestoreFilePicker() {
+      this.$refs.restoreFileInput.click();
+    },
+    async onSettingsRestoreSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      this.restoreBusy = true;
+      this.restoreMessage = '';
+      try {
+        await this.restoreFromBackupFile(file);
+        this.restoreMessage = 'Restore complete.';
+        await this.loadDashboard();
+      } catch (err) {
+        this.restoreMessage = 'Restore failed: ' + (err && err.message ? err.message : 'unknown error');
+      }
+      this.restoreBusy = false;
+      event.target.value = '';
     },
 
     // ---- Jobs / Job Card methods (Phase 0 task 6) ----

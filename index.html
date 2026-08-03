@@ -13,6 +13,28 @@
 </head>
 <body>
   <div id="app" x-data="app()" x-init="init()">
+
+    <template x-if="showFirstRunPrompt">
+      <div class="first-run-overlay">
+        <div class="first-run-card">
+          <h2 class="first-run-title">Set up BusinessOS</h2>
+          <p class="first-run-note">
+            No data found on this device yet. If you're reinstalling after replacing
+            a phone, restore your backup file below. Otherwise, start fresh.
+          </p>
+          <input type="file" accept="application/json" x-ref="firstRunFileInput"
+                 style="display:none" @change="onFirstRunRestoreSelected($event)" />
+          <button class="btn-primary" :disabled="firstRunBusy" @click="$refs.firstRunFileInput.click()">
+            Restore from Backup File
+          </button>
+          <button class="btn-secondary" :disabled="firstRunBusy" @click="dismissFirstRunStartFresh()">
+            Start Fresh
+          </button>
+          <p class="first-run-message" x-show="firstRunMessage" x-text="firstRunMessage"></p>
+        </div>
+      </div>
+    </template>
+
     <header class="topbar">
       <span class="topbar-title" x-text="screenTitle"></span>
     </header>
@@ -547,6 +569,7 @@
 
           <template x-if="moreView === 'search'">
             <div class="jobs-list-view">
+              <button class="btn-secondary more-settings-link" @click="openSettingsScreen()">⚙ Settings</button>
               <span class="bill-section-title">Find Customer / Vehicle</span>
               <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
                      x-model="customerSearchQuery" @input="searchCustomerProfile()" />
@@ -637,6 +660,43 @@
                     </li>
                   </template>
                 </ul>
+              </section>
+            </div>
+          </template>
+
+          <template x-if="moreView === 'settings'">
+            <div class="jobs-list-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="moreView = 'search'">←</button>
+                <div class="job-detail-title">Settings</div>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Backup</h2>
+                <p class="bill-empty-note">
+                  Export all your data (customers, jobs, invoices, inventory — everything)
+                  as one file. Works fully offline. Keep it somewhere safe (Drive, email to yourself, etc.).
+                </p>
+                <button class="btn-primary" :disabled="backupBusy" @click="exportBackup()">
+                  <span x-show="!backupBusy">Export Backup</span>
+                  <span x-show="backupBusy">Exporting…</span>
+                </button>
+                <p class="bill-saved-note" x-show="backupMessage" x-text="backupMessage"></p>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Restore</h2>
+                <p class="bill-empty-note">
+                  Restoring replaces ALL current data on this device with the backup file.
+                  Use this after reinstalling, or to recover from a lost device.
+                </p>
+                <input type="file" accept="application/json" x-ref="restoreFileInput"
+                       style="display:none" @change="onSettingsRestoreSelected($event)" />
+                <button class="btn-secondary" :disabled="restoreBusy" @click="triggerRestoreFilePicker()">
+                  <span x-show="!restoreBusy">Restore from Backup File</span>
+                  <span x-show="restoreBusy">Restoring…</span>
+                </button>
+                <p class="bill-saved-note" x-show="restoreMessage" x-text="restoreMessage"></p>
               </section>
             </div>
           </template>
