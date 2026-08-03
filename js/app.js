@@ -1,3 +1,16 @@
+// Phase 0 task 6 (Job Card, PRD §6.5): the linear part of the job lifecycle.
+// 'cancelled' is deliberately NOT in this array — it's a side-exit reachable
+// from any non-terminal status, not a rung on the ladder, so it's handled
+// separately rather than as a 5th step in the stepper.
+const JOB_STATUS_ORDER = ['pending', 'in_progress', 'completed', 'delivered'];
+const JOB_STATUS_LABELS = {
+  pending: 'Pending',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
 function app() {
   return {
     screen: 'home',
@@ -61,6 +74,68 @@ function app() {
       return t < 0 ? 0 : t;
     },
 
+    // ---- Jobs / Job Card state (Phase 0 task 6, PRD §9 wireframe / §6.5) ----
+    // jobsView switches between the three sub-screens that live under the
+    // "Jobs" nav tab — a list didn't exist before this task since there was
+    // nowhere to reach a Job Card from. Building it is necessary plumbing
+    // for this task, not scope creep (same precedent as New Bill needing
+    // customer/vehicle search-or-create built alongside it).
+    jobsView: 'list', // 'list' | 'newJob' | 'detail'
+    jobsListLoading: true,
+    jobsList: [], // enriched: [{ job, customerName, vehicleNumber }]
+    jobsAscendingIds: [], // creation order, oldest first — see selectedJobDisplayNumber
+    mechanicSuggestions: [], // distinct mechanic names seen so far, for the datalist
+
+    // New Job form (mirrors New Bill's customer/vehicle pattern under a
+    // `job` prefix rather than `bill`, since they're independent flows that
+    // end in different records)
+    jobCustomerQuery: '',
+    jobCustomerResults: [],
+    jobSelectedCustomer: null,
+    jobSelectedVehicle: null,
+    jobNewCustomerMode: false,
+    jobNewCustomerName: '',
+    jobNewCustomerPhone: '',
+    jobVehicleResults: [],
+    jobNewVehicleMode: false,
+    jobNewVehicleNumber: '',
+    jobNewVehicleBrand: '',
+    jobNewVehicleModel: '',
+    jobComplaint: '',
+    jobSaving: false,
+
+    // Job Card detail
+    selectedJob: null,
+    selectedJobCustomer: null,
+    selectedJobVehicle: null,
+    selectedJobIntakePhotos: [],
+    selectedJobCompletionPhotos: [],
+    jobMechanicInput: '', // shared by New Job form and detail's mechanic field
+    jobNewNoteText: '',
+    jobAddNoteMode: false,
+
+    get jobNextStatus() {
+      if (!this.selectedJob) return null;
+      const idx = JOB_STATUS_ORDER.indexOf(this.selectedJob.status);
+      if (idx === -1 || idx === JOB_STATUS_ORDER.length - 1) return null;
+      return JOB_STATUS_ORDER[idx + 1];
+    },
+    // Phase 0 has no job_number counter (unlike invoice_number's row-locked
+    // counter in §6.7 — jobs were never given an equivalent in §11's schema).
+    // This is a local-only display index recomputed from creation order each
+    // time the list loads, NOT a stable persisted identifier. Fine for a
+    // solo-garage Phase 0 UI; would need a real counter if jobs are ever
+    // synced/merged across devices.
+    get selectedJobDisplayNumber() {
+      if (!this.selectedJob) return '';
+      const idx = this.jobsAscendingIds.indexOf(this.selectedJob.id);
+      return String(idx + 1).padStart(4, '0');
+    },
+    get jobNotesList() {
+      if (!this.selectedJob || !this.selectedJob.notes) return [];
+      return this.selectedJob.notes.split('\n').filter(Boolean).reverse();
+    },
+
     async init() {
       console.log('BusinessOS shell initialized. DB ready:', !!window.db);
       await this.loadDashboard();
@@ -69,6 +144,7 @@ function app() {
       this.screen = screen;
       if (screen === 'home') this.loadDashboard();
       if (screen === 'bill') this.openBillScreen();
+      if (screen === 'jobs') this.openJobsScreen();
     },
 
     async loadDashboard() {
@@ -411,6 +487,335 @@ function app() {
     },
     startNewBill() {
       this.billSavedSummary = null;
+    },
+
+    // ---- Jobs / Job Card methods (Phase 0 task 6) ----
+
+    openJobsScreen() {
+      this.jobsView = 'list';
+      this.loadJobsList();
+    },
+
+    async loadJobsList() {
+      this.jobsListLoading = true;
+      const [jobs, customers, vehicles] = await Promise.all([
+        window.db.jobs.toArray(),
+        window.db.customers.toArray(),
+        window.db.vehicles.toArray(),
+      ]);
+      const customerMap = new Map(customers.map((c) => [c.id, c]));
+      const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
+
+      const ascending = [...jobs].sort(
+        (a, b) => new Date(a.created_at) - new Date(b.created_at)
+      );
+      this.jobsAscendingIds = ascending.map((j) => j.id);
+
+      this.jobsList = jobs
+        .slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .map((j) => ({
+          job: j,
+          customerName: (customerMap.get(j.customer_id) || {}).name || '—',
+          vehicleNumber: j.vehicle_id
+            ? (vehicleMap.get(j.vehicle_id) || {}).vehicle_number || ''
+            : '',
+        }));
+
+      const mechSet = new Set();
+      jobs.forEach((j) => {
+        const m = j.custom_fields && j.custom_fields.mechanic_name;
+        if (m) mechSet.add(m);
+      });
+      this.mechanicSuggestions = [...mechSet];
+
+      this.jobsListLoading = false;
+    },
+
+    jobStatusLabel(status) {
+      return JOB_STATUS_LABELS[status] || status;
+    },
+    // Drives the stepper's per-step styling: a step is 'done' if the job has
+    // already passed it, 'current' if it's the job's live status, 'upcoming'
+    // otherwise — or 'cancelled' for every step at once when the job itself
+    // is cancelled, since cancellation isn't a position on the ladder.
+    jobStatusStepState(status, step) {
+      if (status === 'cancelled') return 'cancelled';
+      const curIdx = JOB_STATUS_ORDER.indexOf(status);
+      const stepIdx = JOB_STATUS_ORDER.indexOf(step);
+      if (stepIdx < curIdx) return 'done';
+      if (stepIdx === curIdx) return 'current';
+      return 'upcoming';
+    },
+
+    startNewJob() {
+      this.resetNewJobForm();
+      this.jobsView = 'newJob';
+    },
+    resetNewJobForm() {
+      this.jobSelectedCustomer = null;
+      this.jobSelectedVehicle = null;
+      this.jobVehicleResults = [];
+      this.jobComplaint = '';
+      this.jobMechanicInput = '';
+      this.jobCustomerQuery = '';
+      this.jobCustomerResults = [];
+      this.jobNewCustomerMode = false;
+      this.jobNewVehicleMode = false;
+    },
+
+    // Customer/vehicle search-or-create, duplicated from New Bill's version
+    // under a `job` prefix rather than shared — see BUILD_PROGRESS.md Files
+    // Created notes: worth extracting into one helper once a third screen
+    // needs the same pattern, not worth the abstraction for two.
+    async searchJobCustomer() {
+      const q = this.jobCustomerQuery.trim().toLowerCase();
+      if (!q) {
+        this.jobCustomerResults = [];
+        return;
+      }
+      const [customers, vehicles] = await Promise.all([
+        window.db.customers.toArray(),
+        window.db.vehicles.toArray(),
+      ]);
+      const viaVehicle = vehicles
+        .filter((v) => (v.vehicle_number || '').toLowerCase().includes(q))
+        .map((v) => {
+          const customer = customers.find((c) => c.id === v.customer_id);
+          return customer ? { customer, matchedVehicle: v } : null;
+        })
+        .filter(Boolean);
+      const viaName = customers
+        .filter((c) => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q))
+        .map((c) => ({ customer: c, matchedVehicle: null }));
+
+      const seen = new Set();
+      this.jobCustomerResults = [...viaVehicle, ...viaName].filter((r) => {
+        if (seen.has(r.customer.id)) return false;
+        seen.add(r.customer.id);
+        return true;
+      });
+    },
+    selectJobCustomer(result) {
+      this.jobSelectedCustomer = result.customer;
+      this.jobSelectedVehicle = result.matchedVehicle || null;
+      this.jobCustomerResults = [];
+      this.jobCustomerQuery = '';
+      this.loadJobVehicles();
+    },
+    changeJobCustomer() {
+      this.jobSelectedCustomer = null;
+      this.jobSelectedVehicle = null;
+      this.jobVehicleResults = [];
+    },
+    async saveNewJobCustomer() {
+      const name = this.jobNewCustomerName.trim();
+      if (!name) return;
+      const customer = {
+        id: crypto.randomUUID(),
+        name,
+        phone: this.jobNewCustomerPhone.trim() || null,
+        created_at: new Date().toISOString(),
+      };
+      await window.db.customers.add(customer);
+      this.jobSelectedCustomer = customer;
+      this.jobSelectedVehicle = null;
+      this.jobNewCustomerMode = false;
+      this.jobNewCustomerName = '';
+      this.jobNewCustomerPhone = '';
+      this.loadJobVehicles();
+    },
+    async loadJobVehicles() {
+      if (!this.jobSelectedCustomer) {
+        this.jobVehicleResults = [];
+        return;
+      }
+      this.jobVehicleResults = await window.db.vehicles
+        .where('customer_id')
+        .equals(this.jobSelectedCustomer.id)
+        .toArray();
+    },
+    async saveNewJobVehicle() {
+      const number = this.jobNewVehicleNumber.trim();
+      if (!number || !this.jobSelectedCustomer) return;
+      const vehicle = {
+        id: crypto.randomUUID(),
+        customer_id: this.jobSelectedCustomer.id,
+        vehicle_number: number.toUpperCase(),
+        brand: this.jobNewVehicleBrand.trim() || null,
+        model: this.jobNewVehicleModel.trim() || null,
+        created_at: new Date().toISOString(),
+      };
+      await window.db.vehicles.add(vehicle);
+      this.jobSelectedVehicle = vehicle;
+      this.jobNewVehicleMode = false;
+      this.jobNewVehicleNumber = '';
+      this.jobNewVehicleBrand = '';
+      this.jobNewVehicleModel = '';
+      this.loadJobVehicles();
+    },
+
+    // vehicle_id nullable per §11/§4.1 — a job can be created with only a
+    // customer, same as the PRD's multi-vertical rationale intends.
+    async saveNewJob() {
+      if (!this.jobSelectedCustomer || this.jobSaving) return;
+      this.jobSaving = true;
+
+      const now = new Date().toISOString();
+      const id = crypto.randomUUID();
+
+      await window.db.jobs.add({
+        id,
+        vehicle_id: this.jobSelectedVehicle ? this.jobSelectedVehicle.id : null,
+        customer_id: this.jobSelectedCustomer.id,
+        // No profiles/workers table exists in Phase 0 (§6.11 is a Phase 1+
+        // concept), so there's no id to put here yet — see BUILD_PROGRESS.md
+        // Blockers re: mechanic_name being freeform text instead.
+        assigned_worker_id: null,
+        complaint: this.jobComplaint.trim() || null,
+        status: 'pending',
+        expected_delivery_at: null,
+        notes: '',
+        custom_fields: {
+          mechanic_name: this.jobMechanicInput.trim() || null,
+          status_history: [{ status: 'pending', at: now }],
+        },
+        created_at: now,
+        updated_at: now,
+      });
+
+      this.jobSaving = false;
+      this.resetNewJobForm();
+      await this.loadJobsList();
+      await this.openJobDetail(id);
+    },
+
+    async openJobDetail(jobId) {
+      const job = await window.db.jobs.get(jobId);
+      if (!job) return;
+      this.selectedJob = job;
+      this.selectedJobCustomer = job.customer_id
+        ? await window.db.customers.get(job.customer_id)
+        : null;
+      this.selectedJobVehicle = job.vehicle_id
+        ? await window.db.vehicles.get(job.vehicle_id)
+        : null;
+      this.jobMechanicInput = (job.custom_fields && job.custom_fields.mechanic_name) || '';
+      this.jobNewNoteText = '';
+      this.jobAddNoteMode = false;
+      await this.refreshJobPhotos();
+      this.jobsView = 'detail';
+    },
+    backToJobsList() {
+      this.selectedJob = null;
+      this.jobsView = 'list';
+      this.loadJobsList();
+    },
+
+    async advanceJobStatus() {
+      if (!this.selectedJob || !this.jobNextStatus) return;
+      await this.setJobStatus(this.jobNextStatus);
+    },
+    // Cancellation is a side-exit from any non-terminal status (§6.5's
+    // status list includes it as "plus Cancelled", not as a 5th rung), so
+    // it's a separate action from the forward stepper, guarded by a confirm
+    // per §8's rule that higher-risk status changes keep the confirm dialog
+    // rather than the low-risk "undo toast" pattern used elsewhere.
+    async cancelJob() {
+      if (!this.selectedJob) return;
+      if (!window.confirm('Cancel this job? This cannot be undone from here.')) return;
+      await this.setJobStatus('cancelled');
+    },
+    // §6.5: "status changes are timestamped and attributed (who, when)".
+    // Phase 0 has no auth (per Decisions Locked In), so there's no "who" to
+    // attribute yet — this records "when" via custom_fields.status_history
+    // (reusing the jsonb column §4.1 built in for exactly this kind of
+    // lightweight extension) rather than standing up a whole new table for
+    // one array of timestamps.
+    async setJobStatus(newStatus) {
+      const now = new Date().toISOString();
+      const history = (this.selectedJob.custom_fields && this.selectedJob.custom_fields.status_history) || [];
+      const updatedFields = {
+        status: newStatus,
+        updated_at: now,
+        custom_fields: {
+          ...this.selectedJob.custom_fields,
+          status_history: [...history, { status: newStatus, at: now }],
+        },
+      };
+      await window.db.jobs.update(this.selectedJob.id, updatedFields);
+      this.selectedJob = { ...this.selectedJob, ...updatedFields };
+    },
+
+    // Stored as a raw base64 data URI, uncompressed — client-side
+    // compression (≤1600px longest edge, JPEG ~70%, <300KB target) is its
+    // own later checklist item, deliberately not built here. Camera
+    // permission denied / picker cancelled just means no file arrives —
+    // nothing here blocks job creation or the rest of the Job Card on it,
+    // per §6.5's edge case.
+    onPhotoSelected(event, stage) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = ''; // allow re-selecting the same file again later
+      if (!file || !this.selectedJob) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        await window.db.job_photos.add({
+          id: crypto.randomUUID(),
+          job_id: this.selectedJob.id,
+          url: reader.result,
+          stage,
+          uploaded_by: null,
+          created_at: new Date().toISOString(),
+        });
+        await this.refreshJobPhotos();
+      };
+      reader.readAsDataURL(file);
+    },
+    async refreshJobPhotos() {
+      if (!this.selectedJob) return;
+      const photos = await window.db.job_photos
+        .where('job_id')
+        .equals(this.selectedJob.id)
+        .toArray();
+      this.selectedJobIntakePhotos = photos.filter((p) => p.stage === 'intake');
+      this.selectedJobCompletionPhotos = photos.filter((p) => p.stage === 'completion');
+    },
+
+    // Known shortcut, flagged in BUILD_PROGRESS.md Blockers: this overwrites
+    // mechanic_name rather than keeping history, so §6.5's "reassigned mid-
+    // repair keeps both mechanics' involvement" edge case isn't handled yet.
+    async updateJobMechanic() {
+      if (!this.selectedJob) return;
+      const name = this.jobMechanicInput.trim() || null;
+      const updatedFields = {
+        updated_at: new Date().toISOString(),
+        custom_fields: { ...this.selectedJob.custom_fields, mechanic_name: name },
+      };
+      await window.db.jobs.update(this.selectedJob.id, updatedFields);
+      this.selectedJob = { ...this.selectedJob, ...updatedFields };
+      if (name && !this.mechanicSuggestions.includes(name)) {
+        this.mechanicSuggestions.push(name);
+      }
+    },
+
+    async addJobNote() {
+      const text = this.jobNewNoteText.trim();
+      if (!text || !this.selectedJob) return;
+      const stamp = new Date().toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const line = `[${stamp}] ${text}`;
+      const updatedNotes = this.selectedJob.notes ? this.selectedJob.notes + '\n' + line : line;
+      await window.db.jobs.update(this.selectedJob.id, {
+        notes: updatedNotes,
+        updated_at: new Date().toISOString(),
+      });
+      this.selectedJob = { ...this.selectedJob, notes: updatedNotes };
+      this.jobNewNoteText = '';
+      this.jobAddNoteMode = false;
     },
   };
 }

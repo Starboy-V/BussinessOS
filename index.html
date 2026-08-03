@@ -51,7 +51,241 @@
         </div>
       </template>
       <template x-if="screen === 'jobs'">
-        <div class="placeholder-screen"><p>Jobs — coming soon.</p></div>
+        <div class="jobs-screen">
+
+          <template x-if="jobsView === 'list'">
+            <div class="jobs-list-view">
+              <div class="jobs-header-row">
+                <span class="bill-section-title">All Jobs</span>
+                <button class="btn-primary" @click="startNewJob()">+ New Job</button>
+              </div>
+
+              <template x-if="!jobsListLoading && jobsList.length === 0">
+                <p class="dashboard-empty">No jobs yet — tap "+ New Job" to create the first one.</p>
+              </template>
+
+              <ul class="jobs-list" x-show="jobsList.length > 0">
+                <template x-for="entry in jobsList" :key="entry.job.id">
+                  <li class="job-list-item" @click="openJobDetail(entry.job.id)">
+                    <div class="job-list-item-main">
+                      <strong x-text="entry.vehicleNumber || entry.customerName"></strong>
+                      <span class="job-status-badge" :class="'job-status-badge--' + entry.job.status"
+                            x-text="jobStatusLabel(entry.job.status)"></span>
+                    </div>
+                    <div class="job-list-item-sub">
+                      <span x-show="entry.vehicleNumber" x-text="entry.customerName"></span>
+                      <span x-text="entry.job.complaint || 'No complaint noted'"></span>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+
+          <template x-if="jobsView === 'newJob'">
+            <div class="jobs-list-view">
+              <div class="jobs-header-row">
+                <button class="btn-link" @click="jobsView = 'list'">← Cancel</button>
+                <span class="bill-section-title">New Job</span>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Customer</h2>
+                <template x-if="!jobSelectedCustomer">
+                  <div>
+                    <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                           x-model="jobCustomerQuery" @input="searchJobCustomer()" />
+                    <template x-if="jobCustomerResults.length > 0">
+                      <ul class="bill-result-list">
+                        <template x-for="r in jobCustomerResults" :key="r.customer.id">
+                          <li class="bill-result-item" @click="selectJobCustomer(r)">
+                            <span x-text="r.customer.name"></span>
+                            <span class="bill-result-sub"
+                                  x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </template>
+                    <button class="btn-secondary" @click="jobNewCustomerMode = !jobNewCustomerMode">+ New Customer</button>
+                    <template x-if="jobNewCustomerMode">
+                      <div class="bill-inline-form">
+                        <input class="bill-input" type="text" placeholder="Name" x-model="jobNewCustomerName" />
+                        <input class="bill-input" type="tel" placeholder="Phone" x-model="jobNewCustomerPhone" />
+                        <button class="btn-primary" @click="saveNewJobCustomer()">Save Customer</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="jobSelectedCustomer">
+                  <div class="bill-selected-customer">
+                    <div>
+                      <strong x-text="jobSelectedCustomer.name"></strong><br />
+                      <span class="bill-result-sub" x-text="jobSelectedCustomer.phone || ''"></span>
+                    </div>
+                    <button class="btn-link" @click="changeJobCustomer()">Change</button>
+                  </div>
+                </template>
+              </section>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Vehicle <span class="bill-optional">(optional)</span></h2>
+                  <template x-if="jobVehicleResults.length > 0">
+                    <div class="bill-chip-row">
+                      <template x-for="v in jobVehicleResults" :key="v.id">
+                        <button class="bill-chip" :class="{ 'bill-chip--active': jobSelectedVehicle && jobSelectedVehicle.id === v.id }"
+                                @click="jobSelectedVehicle = v">
+                          <span x-text="v.vehicle_number"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <button class="btn-secondary" @click="jobNewVehicleMode = !jobNewVehicleMode">+ New Vehicle</button>
+                  <template x-if="jobNewVehicleMode">
+                    <div class="bill-inline-form">
+                      <input class="bill-input" type="text" placeholder="Plate number" x-model="jobNewVehicleNumber" />
+                      <input class="bill-input" type="text" placeholder="Brand (optional)" x-model="jobNewVehicleBrand" />
+                      <input class="bill-input" type="text" placeholder="Model (optional)" x-model="jobNewVehicleModel" />
+                      <button class="btn-primary" @click="saveNewJobVehicle()">Save Vehicle</button>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Complaint</h2>
+                  <textarea class="bill-input" rows="3" placeholder="What's wrong with the vehicle?"
+                            x-model="jobComplaint"></textarea>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Mechanic <span class="bill-optional">(optional)</span></h2>
+                  <input class="bill-input" type="text" list="mechanic-suggestions-new" placeholder="Assign a mechanic"
+                         x-model="jobMechanicInput" />
+                  <datalist id="mechanic-suggestions-new">
+                    <template x-for="m in mechanicSuggestions" :key="m">
+                      <option :value="m"></option>
+                    </template>
+                  </datalist>
+                </section>
+              </template>
+
+              <template x-if="jobSelectedCustomer">
+                <button class="btn-primary btn-full" :disabled="jobSaving" @click="saveNewJob()">
+                  <span x-text="jobSaving ? 'Saving…' : 'Create Job'"></span>
+                </button>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="jobsView === 'detail' && selectedJob">
+            <div class="job-detail-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="backToJobsList()">←</button>
+                <div>
+                  <div class="job-detail-title" x-text="'Job #' + selectedJobDisplayNumber"></div>
+                  <div class="job-detail-subtitle">
+                    <span x-show="selectedJobVehicle"
+                          x-text="selectedJobVehicle ? (selectedJobVehicle.vehicle_number + (selectedJobVehicle.brand ? ' · ' + selectedJobVehicle.brand : '') + (selectedJobVehicle.model ? ' ' + selectedJobVehicle.model : '')) : ''"></span>
+                    <span x-show="!selectedJobVehicle" x-text="selectedJobCustomer ? selectedJobCustomer.name : ''"></span>
+                  </div>
+                </div>
+              </div>
+
+              <section class="bill-section">
+                <div class="status-stepper">
+                  <template x-for="(step, i) in ['pending','in_progress','completed','delivered']" :key="step">
+                    <div class="status-step-wrap">
+                      <div class="status-step" :class="'status-step--' + jobStatusStepState(selectedJob.status, step)">
+                        <span class="status-step-dot"></span>
+                        <span class="status-step-label" x-text="jobStatusLabel(step)"></span>
+                      </div>
+                      <div class="status-step-connector" x-show="i < 3"></div>
+                    </div>
+                  </template>
+                </div>
+
+                <template x-if="selectedJob.status === 'cancelled'">
+                  <p class="job-cancelled-note">This job was cancelled.</p>
+                </template>
+
+                <template x-if="jobNextStatus">
+                  <button class="btn-primary btn-full" @click="advanceJobStatus()">
+                    <span x-text="'Mark as ' + jobStatusLabel(jobNextStatus)"></span>
+                  </button>
+                </template>
+
+                <template x-if="selectedJob.status !== 'delivered' && selectedJob.status !== 'cancelled'">
+                  <button class="btn-link job-cancel-link" @click="cancelJob()">Cancel job</button>
+                </template>
+              </section>
+
+              <template x-if="selectedJob.complaint">
+                <section class="bill-section">
+                  <h2 class="bill-section-title">Complaint</h2>
+                  <p class="job-complaint-text" x-text="selectedJob.complaint"></p>
+                </section>
+              </template>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Intake photos (<span x-text="selectedJobIntakePhotos.length"></span>)</h2>
+                <div class="photo-grid">
+                  <template x-for="p in selectedJobIntakePhotos" :key="p.id">
+                    <img class="photo-thumb" :src="p.url" alt="Intake photo" />
+                  </template>
+                  <button class="photo-add-btn" @click="$refs.intakePhotoInput.click()">+</button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" x-ref="intakePhotoInput" style="display:none"
+                       @change="onPhotoSelected($event, 'intake')" />
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Completion photos (<span x-text="selectedJobCompletionPhotos.length"></span>)</h2>
+                <div class="photo-grid">
+                  <template x-for="p in selectedJobCompletionPhotos" :key="p.id">
+                    <img class="photo-thumb" :src="p.url" alt="Completion photo" />
+                  </template>
+                  <button class="photo-add-btn" @click="$refs.completionPhotoInput.click()">+</button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" x-ref="completionPhotoInput" style="display:none"
+                       @change="onPhotoSelected($event, 'completion')" />
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Mechanic</h2>
+                <input class="bill-input" type="text" list="mechanic-suggestions-detail" placeholder="Assign a mechanic"
+                       x-model="jobMechanicInput" @change="updateJobMechanic()" />
+                <datalist id="mechanic-suggestions-detail">
+                  <template x-for="m in mechanicSuggestions" :key="m">
+                    <option :value="m"></option>
+                  </template>
+                </datalist>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Notes</h2>
+                <ul class="job-notes-list" x-show="jobNotesList.length > 0">
+                  <template x-for="(n, i) in jobNotesList" :key="i">
+                    <li class="job-note-item" x-text="n"></li>
+                  </template>
+                </ul>
+                <template x-if="!jobAddNoteMode">
+                  <button class="btn-secondary" @click="jobAddNoteMode = true">+ Add Note</button>
+                </template>
+                <template x-if="jobAddNoteMode">
+                  <div class="bill-inline-form">
+                    <textarea class="bill-input" rows="2" placeholder="Note" x-model="jobNewNoteText"></textarea>
+                    <button class="btn-primary" @click="addJobNote()">Save Note</button>
+                  </div>
+                </template>
+              </section>
+            </div>
+          </template>
+
+        </div>
       </template>
       <template x-if="screen === 'bill'">
         <div class="bill-screen">
