@@ -136,6 +136,19 @@ function app() {
       return this.selectedJob.notes.split('\n').filter(Boolean).reverse();
     },
 
+    // ---- Customer/Vehicle Profile state (Phase 0 task 7, PRD §6.4 / §9) ----
+    // Reached via the "More" tab — §8 already answers the "where does this
+    // live" question flagged in BUILD_PROGRESS.md's Next Task ("customers,
+    // reports, settings folded here to avoid tab overload"), so this wasn't
+    // actually an open decision once §8 was re-read, just an unread one.
+    moreView: 'search', // 'search' | 'profile'
+    customerSearchQuery: '',
+    customerSearchResults: [], // ranked: [{ customer, matchedVehicle, rank }]
+    profileCustomer: null,
+    profileVehicles: [],
+    profileJobs: [],
+    profileInvoices: [], // [{ invoice, payments }]
+
     async init() {
       console.log('BusinessOS shell initialized. DB ready:', !!window.db);
       await this.loadDashboard();
@@ -145,6 +158,7 @@ function app() {
       if (screen === 'home') this.loadDashboard();
       if (screen === 'bill') this.openBillScreen();
       if (screen === 'jobs') this.openJobsScreen();
+      if (screen === 'more') this.openMoreScreen();
     },
 
     async loadDashboard() {
@@ -816,6 +830,129 @@ function app() {
       this.selectedJob = { ...this.selectedJob, notes: updatedNotes };
       this.jobNewNoteText = '';
       this.jobAddNoteMode = false;
+    },
+
+    // ---- Customer/Vehicle Profile methods (Phase 0 task 7, PRD §6.4) ----
+
+    openMoreScreen() {
+      // Mirrors openJobsScreen()'s convention: re-entering a tab resets to
+      // that tab's root view rather than remembering wherever you left it.
+      this.moreView = 'search';
+      this.customerSearchResults = [];
+      this.profileCustomer = null;
+    },
+
+    // Ranked per §9's Notable States column: exact plate match > exact
+    // phone match > name fuzzy match. A 4th tier (partial plate/phone) is
+    // added below those three so a partially-typed number still returns
+    // something useful — it just never outranks an exact hit, preserving
+    // the spec's ordering. This is a read-only lookup, not a
+    // search-or-create flow like Bill/Job's customer search, so it's a
+    // separate function rather than a 3rd copy of theirs (see the comment
+    // on searchJobCustomer) — the ranking behavior is genuinely different,
+    // not just the same thing typed out again.
+    async searchCustomerProfile() {
+      const q = this.customerSearchQuery.trim().toLowerCase();
+      if (!q) {
+        this.customerSearchResults = [];
+        return;
+      }
+      const [customers, vehicles] = await Promise.all([
+        window.db.customers.toArray(),
+        window.db.vehicles.toArray(),
+      ]);
+      const byId = new Map();
+      const consider = (customer, matchedVehicle, rank) => {
+        const existing = byId.get(customer.id);
+        if (!existing || rank < existing.rank) {
+          byId.set(customer.id, {
+            customer,
+            matchedVehicle: matchedVehicle || (existing && existing.matchedVehicle) || null,
+            rank,
+          });
+        }
+      };
+      for (const v of vehicles) {
+        const num = (v.vehicle_number || '').toLowerCase();
+        if (!num) continue;
+        const customer = customers.find((c) => c.id === v.customer_id);
+        if (!customer) continue;
+        if (num === q) consider(customer, v, 0);
+        else if (num.includes(q)) consider(customer, v, 3);
+      }
+      for (const c of customers) {
+        const phone = c.phone || '';
+        const name = (c.name || '').toLowerCase();
+        if (phone && phone === q) consider(c, null, 1);
+        else if (phone && phone.includes(q)) consider(c, null, 3);
+        if (name.includes(q)) consider(c, null, 2);
+      }
+      this.customerSearchResults = [...byId.values()].sort(
+        (a, b) => a.rank - b.rank || a.customer.name.localeCompare(b.customer.name)
+      );
+    },
+
+    // Loads "vehicles, invoices, jobs, payments in one scroll" per §6.4.
+    // NOTE (see BUILD_PROGRESS.md Blockers): §6.4 also specifies vehicle
+    // ownership transfer with an audit trail — not implemented in Phase 0,
+    // so profileVehicles is simply "every vehicle whose customer_id is this
+    // customer right now," with no transfer history to show even if one
+    // had happened.
+    async openCustomerProfile(customerId) {
+      const customer = await window.db.customers.get(customerId);
+      if (!customer) return;
+      this.profileCustomer = customer;
+
+      this.profileVehicles = await window.db.vehicles
+        .where('customer_id')
+        .equals(customerId)
+        .toArray();
+
+      this.profileJobs = (
+        await window.db.jobs.where('customer_id').equals(customerId).toArray()
+      ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      const [invoices, allPayments] = await Promise.all([
+        window.db.invoices.where('customer_id').equals(customerId).toArray(),
+        window.db.payments.toArray(),
+      ]);
+      this.profileInvoices = invoices
+        .slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .map((invoice) => ({
+          invoice,
+          payments: allPayments.filter((p) => p.invoice_id === invoice.id),
+        }));
+
+      this.moreView = 'profile';
+    },
+
+    // Deliberately does NOT clear customerSearchResults — coming back from
+    // a profile should still show the same search results, so picking a
+    // different customer from an ambiguous search doesn't mean retyping.
+    backToCustomerSearch() {
+      this.moreView = 'search';
+      this.profileCustomer = null;
+    },
+
+    profileVehicleNumber(vehicleId) {
+      if (!vehicleId) return '';
+      const v = this.profileVehicles.find((x) => x.id === vehicleId);
+      return v ? v.vehicle_number : '';
+    },
+
+    // Jumps into the Jobs tab's own detail view rather than building a
+    // second Job Card renderer here — Job Card stays canonical in one
+    // place, same instinct as New Bill not re-rendering it either.
+    openJobFromProfile(jobId) {
+      this.screen = 'jobs';
+      this.openJobDetail(jobId);
+    },
+
+    invoiceStatusLabel(status) {
+      if (status === 'paid') return 'Paid';
+      if (status === 'pending') return 'Pending';
+      return status || '—';
     },
   };
 }

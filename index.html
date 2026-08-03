@@ -473,7 +473,105 @@
         <div class="placeholder-screen"><p>Inventory — coming soon.</p></div>
       </template>
       <template x-if="screen === 'more'">
-        <div class="placeholder-screen"><p>More — coming soon.</p></div>
+        <div class="more-screen">
+
+          <template x-if="moreView === 'search'">
+            <div class="jobs-list-view">
+              <span class="bill-section-title">Find Customer / Vehicle</span>
+              <input class="bill-input" type="text" placeholder="Search name, phone, or plate number"
+                     x-model="customerSearchQuery" @input="searchCustomerProfile()" />
+
+              <template x-if="customerSearchQuery.trim() && customerSearchResults.length === 0">
+                <p class="dashboard-empty">No matches — try a different name, phone, or plate.</p>
+              </template>
+
+              <ul class="bill-result-list" x-show="customerSearchResults.length > 0">
+                <template x-for="r in customerSearchResults" :key="r.customer.id">
+                  <li class="bill-result-item" @click="openCustomerProfile(r.customer.id)">
+                    <span x-text="r.customer.name"></span>
+                    <span class="bill-result-sub"
+                          x-text="r.matchedVehicle ? r.matchedVehicle.vehicle_number : (r.customer.phone || '')"></span>
+                  </li>
+                </template>
+              </ul>
+
+              <template x-if="!customerSearchQuery.trim()">
+                <p class="dashboard-empty">Search by plate number, phone, or name to see a customer's full history — vehicles, jobs, invoices, and payments in one place.</p>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="moreView === 'profile' && profileCustomer">
+            <div class="jobs-list-view">
+              <div class="job-detail-header">
+                <button class="job-back-btn" @click="backToCustomerSearch()">←</button>
+                <div>
+                  <div class="job-detail-title" x-text="profileCustomer.name"></div>
+                  <div class="job-detail-subtitle" x-text="profileCustomer.phone || 'No phone on file'"></div>
+                </div>
+              </div>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Vehicles</h2>
+                <template x-if="profileVehicles.length === 0">
+                  <p class="bill-empty-note">No vehicles on file for this customer.</p>
+                </template>
+                <ul class="bill-result-list" x-show="profileVehicles.length > 0">
+                  <template x-for="v in profileVehicles" :key="v.id">
+                    <li class="bill-result-item">
+                      <span x-text="v.vehicle_number"></span>
+                      <span class="bill-result-sub" x-text="[v.brand, v.model].filter(Boolean).join(' ') || 'No make/model on file'"></span>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Jobs</h2>
+                <template x-if="profileJobs.length === 0">
+                  <p class="bill-empty-note">No jobs yet for this customer.</p>
+                </template>
+                <ul class="jobs-list" x-show="profileJobs.length > 0">
+                  <template x-for="j in profileJobs" :key="j.id">
+                    <li class="job-list-item" @click="openJobFromProfile(j.id)">
+                      <div class="job-list-item-main">
+                        <strong x-text="profileVehicleNumber(j.vehicle_id) || 'No vehicle'"></strong>
+                        <span class="job-status-badge" :class="'job-status-badge--' + j.status"
+                              x-text="jobStatusLabel(j.status)"></span>
+                      </div>
+                      <div class="job-list-item-sub">
+                        <span x-text="j.complaint || 'No complaint noted'"></span>
+                        <span x-text="new Date(j.created_at).toLocaleDateString('en-IN')"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+
+              <section class="bill-section">
+                <h2 class="bill-section-title">Invoices &amp; Payments</h2>
+                <template x-if="profileInvoices.length === 0">
+                  <p class="bill-empty-note">No invoices yet for this customer.</p>
+                </template>
+                <ul class="bill-line-items" x-show="profileInvoices.length > 0">
+                  <template x-for="entry in profileInvoices" :key="entry.invoice.id">
+                    <li class="bill-line-item">
+                      <div class="bill-line-item-main">
+                        <span x-text="entry.invoice.invoice_number ? ('Invoice ' + entry.invoice.invoice_number) : 'Invoice pending sync'"></span>
+                        <span class="bill-line-item-price" x-text="formatCurrency(entry.invoice.total)"></span>
+                      </div>
+                      <div class="job-list-item-sub">
+                        <span x-text="new Date(entry.invoice.created_at).toLocaleDateString('en-IN')"></span>
+                        <span x-text="invoiceStatusLabel(entry.invoice.status) + (entry.payments.length ? ' · ' + entry.payments.map(p => p.method).join(', ') : '')"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+            </div>
+          </template>
+
+        </div>
       </template>
     </main>
 
