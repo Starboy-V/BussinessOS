@@ -149,6 +149,25 @@ function app() {
     profileJobs: [],
     profileInvoices: [], // [{ invoice, payments }]
 
+    // ---- Inventory state (Phase 0 task 8, PRD §6.6) ----
+    // Scope note: only "Local Stock" + purchase recording are built here.
+    // "Ordered Parts" (in-transit tracking, expected delivery, received
+    // toggle) is deliberately NOT built this task — see BUILD_PROGRESS.md
+    // Blockers for the real §5-vs-§6.6/§9 scope conflict behind that call.
+    inventoryLoading: true,
+    inventoryItems: [],
+    inventoryAddMode: false,
+    inventoryNewName: '',
+    inventoryNewCategory: '',
+    inventoryNewBuyingPrice: '',
+    inventoryNewSellingPrice: '',
+    inventoryNewMinStock: '',
+    inventoryPurchaseItemId: null, // which row's inline purchase form is open
+    inventoryPurchaseQty: '',
+    inventoryPurchaseUnitCost: '',
+    inventoryPurchasePaidTo: '',
+    inventorySaving: false,
+
     async init() {
       console.log('BusinessOS shell initialized. DB ready:', !!window.db);
       await this.loadDashboard();
@@ -159,6 +178,7 @@ function app() {
       if (screen === 'bill') this.openBillScreen();
       if (screen === 'jobs') this.openJobsScreen();
       if (screen === 'more') this.openMoreScreen();
+      if (screen === 'inventory') this.openInventoryScreen();
     },
 
     async loadDashboard() {
@@ -435,6 +455,14 @@ function app() {
     // payments row (§6.8: it's a valid method meaning "owed"), but the
     // invoice status stays 'pending' rather than 'paid', and the Dashboard
     // excludes credit from Revenue accordingly.
+    //
+    // Wrapped in one Dexie transaction (added in task 8) per §7's "every
+    // financial write... must be atomic" NFR — this was a gap left over
+    // from task 5 (sequential unguarded writes), closed here because task
+    // 8 needed the invoice write and the part-stock decrement to be
+    // atomic with each other anyway, so the whole method got the same
+    // treatment rather than leaving payments/line-items unguarded next to
+    // a guarded stock write.
     async saveBill() {
       if (!this.billSelectedCustomer || this.billLineItems.length === 0 || this.billSaving) return;
       this.billSaving = true;
@@ -442,40 +470,80 @@ function app() {
       const now = new Date().toISOString();
       const invoiceId = crypto.randomUUID();
       const deviceLocalId = 'LOCAL-' + Date.now();
+      const partLineItems = this.billLineItems.filter(
+        (li) => li.item_type === 'part' && li.reference_id
+      );
 
-      await window.db.invoices.add({
-        id: invoiceId,
-        job_id: null,
-        customer_id: this.billSelectedCustomer.id,
-        invoice_number: null, // assigned at sync time in Phase 1 (§6.7) — no sync exists in Phase 0
-        device_local_id: deviceLocalId,
-        subtotal: this.billSubtotal,
-        discount: Number(this.billDiscount || 0),
-        tax: Number(this.billTax || 0),
-        total: this.billTotal,
-        status: this.billPaymentMethod === 'credit' ? 'pending' : 'paid',
-        pdf_url: null,
-        created_at: now,
-      });
+      await window.db.transaction(
+        'rw',
+        window.db.invoices,
+        window.db.invoice_line_items,
+        window.db.payments,
+        window.db.inventory_items,
+        window.db.inventory_transactions,
+        async () => {
+          await window.db.invoices.add({
+            id: invoiceId,
+            job_id: null,
+            customer_id: this.billSelectedCustomer.id,
+            invoice_number: null, // assigned at sync time in Phase 1 (§6.7) — no sync exists in Phase 0
+            device_local_id: deviceLocalId,
+            subtotal: this.billSubtotal,
+            discount: Number(this.billDiscount || 0),
+            tax: Number(this.billTax || 0),
+            total: this.billTotal,
+            status: this.billPaymentMethod === 'credit' ? 'pending' : 'paid',
+            pdf_url: null,
+            created_at: now,
+          });
 
-      for (const li of this.billLineItems) {
-        await window.db.invoice_line_items.add({
-          id: crypto.randomUUID(),
-          invoice_id: invoiceId,
-          description: li.description,
-          quantity: li.quantity,
-          unit_price: li.unit_price,
-          line_total: li.quantity * li.unit_price,
-        });
-      }
+          for (const li of this.billLineItems) {
+            await window.db.invoice_line_items.add({
+              id: crypto.randomUUID(),
+              invoice_id: invoiceId,
+              description: li.description,
+              quantity: li.quantity,
+              unit_price: li.unit_price,
+              line_total: li.quantity * li.unit_price,
+            });
+          }
 
-      await window.db.payments.add({
-        id: crypto.randomUUID(),
-        invoice_id: invoiceId,
-        amount: this.billTotal,
-        method: this.billPaymentMethod,
-        paid_at: now,
-      });
+          await window.db.payments.add({
+            id: crypto.randomUUID(),
+            invoice_id: invoiceId,
+            amount: this.billTotal,
+            method: this.billPaymentMethod,
+            paid_at: now,
+          });
+
+          // §6.6: billing a part auto-decrements stock. Selling more than
+          // is on hand is explicitly ALLOWED, not blocked (§6.6 edge
+          // case) — the Local Stock screen flags the resulting negative
+          // number in red instead of silently normalizing it.
+          //
+          // reference_type is 'manual' here, not something like 'invoice',
+          // because §11's inventory_transactions check constraint only
+          // allows 'job' | 'expense' | 'manual' — none of which is really
+          // "sold via an invoice line item." Flagged in BUILD_PROGRESS.md
+          // Blockers as a real schema gap rather than silently picking one
+          // of the three and pretending it fits.
+          for (const li of partLineItems) {
+            const item = await window.db.inventory_items.get(li.reference_id);
+            if (!item) continue;
+            const newStock = Number(item.current_stock || 0) - Number(li.quantity);
+            await window.db.inventory_items.update(item.id, { current_stock: newStock });
+            await window.db.inventory_transactions.add({
+              id: crypto.randomUUID(),
+              inventory_item_id: item.id,
+              type: 'sale',
+              quantity: -Number(li.quantity),
+              reference_type: 'manual',
+              reference_id: invoiceId,
+              created_at: now,
+            });
+          }
+        }
+      );
 
       this.billSavedSummary = {
         total: this.billTotal,
@@ -485,6 +553,7 @@ function app() {
       this.resetBillDraft();
       this.billSaving = false;
       await this.loadDashboard();
+      if (partLineItems.length > 0) await this.loadInventoryItems();
     },
     resetBillDraft() {
       this.billSelectedCustomer = null;
@@ -953,6 +1022,136 @@ function app() {
       if (status === 'paid') return 'Paid';
       if (status === 'pending') return 'Pending';
       return status || '—';
+    },
+
+    // ---- Inventory methods (Phase 0 task 8, PRD §6.6) ----
+
+    async openInventoryScreen() {
+      await this.ensureExpenseCategoriesSeeded();
+      await this.loadInventoryItems();
+    },
+
+    async loadInventoryItems() {
+      this.inventoryLoading = true;
+      this.inventoryItems = (await window.db.inventory_items.toArray())
+        .filter((i) => i.is_active !== false)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      this.inventoryLoading = false;
+    },
+
+    // §6.9's five named defaults (Rent/Salary/Fuel/Electricity/Tea-Misc)
+    // don't include anything for "money spent buying parts" — none of them
+    // fit, and §6.9 explicitly allows unlimited custom categories, so
+    // adding a 6th default here (rather than leaving the auto-created
+    // purchase expense with no category) is within spec, not a scope call
+    // that needs flagging. Idempotent, same pattern as
+    // ensureServiceCatalogSeeded().
+    async ensureExpenseCategoriesSeeded() {
+      const count = await window.db.expense_categories.count();
+      if (count > 0) return;
+      const defaults = ['Rent', 'Salary', 'Fuel', 'Electricity', 'Tea/Misc', 'Inventory Purchase'];
+      for (const name of defaults) {
+        await window.db.expense_categories.add({
+          id: crypto.randomUUID(),
+          name,
+          is_custom: false,
+        });
+      }
+    },
+
+    startAddInventoryItem() {
+      this.inventoryAddMode = true;
+      this.inventoryNewName = '';
+      this.inventoryNewCategory = '';
+      this.inventoryNewBuyingPrice = '';
+      this.inventoryNewSellingPrice = '';
+      this.inventoryNewMinStock = '';
+    },
+    async saveNewInventoryItem() {
+      const name = this.inventoryNewName.trim();
+      if (!name || this.inventorySaving) return;
+      this.inventorySaving = true;
+      await window.db.inventory_items.add({
+        id: crypto.randomUUID(),
+        name,
+        category: this.inventoryNewCategory.trim() || null,
+        buying_price: Number(this.inventoryNewBuyingPrice) || 0,
+        selling_price: Number(this.inventoryNewSellingPrice) || 0,
+        min_stock: Number(this.inventoryNewMinStock) || 0,
+        current_stock: 0,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      });
+      this.inventorySaving = false;
+      this.inventoryAddMode = false;
+      await this.loadInventoryItems();
+    },
+
+    // Tapping a row opens/closes its own inline purchase form (tap again
+    // to collapse) rather than navigating to a separate screen — same
+    // one-thumb, minimal-navigation instinct as the rest of the app.
+    toggleInventoryPurchase(itemId) {
+      this.inventoryPurchaseItemId = this.inventoryPurchaseItemId === itemId ? null : itemId;
+      this.inventoryPurchaseQty = '';
+      this.inventoryPurchaseUnitCost = '';
+      this.inventoryPurchasePaidTo = '';
+    },
+
+    // The atomic "enter once, updates everywhere" moment §6.6 calls the
+    // single most valuable one in the product: recording a purchase
+    // increments stock AND writes the linked expense in one Dexie
+    // transaction, so an interruption mid-write can never leave stock
+    // updated with no matching expense, or vice versa (§7).
+    async recordPurchase() {
+      const item = this.inventoryItems.find((i) => i.id === this.inventoryPurchaseItemId);
+      const qty = Number(this.inventoryPurchaseQty);
+      if (!item || !qty || qty <= 0 || this.inventorySaving) return;
+      this.inventorySaving = true;
+
+      const unitCost = Number(this.inventoryPurchaseUnitCost) || 0;
+      const paidTo = this.inventoryPurchasePaidTo.trim() || null;
+      const now = new Date().toISOString();
+      const expenseId = crypto.randomUUID();
+      const expenseCategory = (await window.db.expense_categories.toArray()).find(
+        (c) => c.name === 'Inventory Purchase'
+      );
+
+      await window.db.transaction(
+        'rw',
+        window.db.inventory_items,
+        window.db.inventory_transactions,
+        window.db.expenses,
+        async () => {
+          const newStock = Number(item.current_stock || 0) + qty;
+          await window.db.inventory_items.update(item.id, { current_stock: newStock });
+
+          await window.db.inventory_transactions.add({
+            id: crypto.randomUUID(),
+            inventory_item_id: item.id,
+            type: 'purchase',
+            quantity: qty,
+            reference_type: 'expense',
+            reference_id: expenseId,
+            created_at: now,
+          });
+
+          await window.db.expenses.add({
+            id: expenseId,
+            category_id: expenseCategory ? expenseCategory.id : null,
+            amount: qty * unitCost,
+            description: `Purchased ${qty} × ${item.name}`,
+            paid_to: paidTo,
+            expense_date: now,
+            receipt_url: null,
+            created_at: now,
+          });
+        }
+      );
+
+      this.inventorySaving = false;
+      this.toggleInventoryPurchase(item.id); // collapses the form (same id → toggles closed)
+      await this.loadInventoryItems();
+      await this.loadDashboard();
     },
   };
 }

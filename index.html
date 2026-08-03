@@ -470,7 +470,71 @@
         </div>
       </template>
       <template x-if="screen === 'inventory'">
-        <div class="placeholder-screen"><p>Inventory — coming soon.</p></div>
+        <div class="jobs-list-view">
+          <div class="jobs-header-row">
+            <span class="bill-section-title">Local Stock</span>
+            <button class="btn-primary" @click="startAddInventoryItem()">+ New Item</button>
+          </div>
+
+          <template x-if="inventoryAddMode">
+            <section class="bill-section">
+              <h2 class="bill-section-title">New Item</h2>
+              <div class="bill-inline-form">
+                <input class="bill-input" type="text" placeholder="Item name" x-model="inventoryNewName" />
+                <input class="bill-input" type="text" placeholder="Category (optional)" x-model="inventoryNewCategory" />
+                <input class="bill-input" type="number" placeholder="Buying price" x-model="inventoryNewBuyingPrice" />
+                <input class="bill-input" type="number" placeholder="Selling price" x-model="inventoryNewSellingPrice" />
+                <input class="bill-input" type="number" placeholder="Low-stock alert level" x-model="inventoryNewMinStock" />
+                <div class="bill-adjust-row">
+                  <button class="btn-link" @click="inventoryAddMode = false">Cancel</button>
+                  <button class="btn-primary" :disabled="inventorySaving" @click="saveNewInventoryItem()">Save Item</button>
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <template x-if="!inventoryLoading && inventoryItems.length === 0 && !inventoryAddMode">
+            <p class="dashboard-empty">No inventory items yet — tap "+ New Item" to add the first one.</p>
+          </template>
+
+          <ul class="jobs-list" x-show="inventoryItems.length > 0">
+            <template x-for="item in inventoryItems" :key="item.id">
+              <li class="job-list-item" :class="{ 'inventory-item--negative': item.current_stock < 0 }"
+                  @click="toggleInventoryPurchase(item.id)">
+                <div class="job-list-item-main">
+                  <strong x-text="item.name"></strong>
+                  <span class="inventory-stock-badge"
+                        :class="{
+                          'inventory-stock-badge--negative': item.current_stock < 0,
+                          'inventory-stock-badge--low': item.current_stock >= 0 && item.current_stock <= item.min_stock
+                        }"
+                        x-text="item.current_stock"></span>
+                </div>
+                <div class="job-list-item-sub">
+                  <span x-text="item.category || 'Uncategorized'"></span>
+                  <span x-text="'Buy ' + formatCurrency(item.buying_price) + ' · Sell ' + formatCurrency(item.selling_price)"></span>
+                  <span x-show="item.current_stock < 0" class="inventory-negative-note">Negative stock — sold more than recorded on hand</span>
+                  <span x-show="item.current_stock >= 0 && item.current_stock <= item.min_stock" class="inventory-low-note">
+                    Low stock (min <span x-text="item.min_stock"></span>)
+                  </span>
+                </div>
+
+                <template x-if="inventoryPurchaseItemId === item.id">
+                  <div class="bill-inline-form" @click.stop>
+                    <span class="bill-result-sub">Record a purchase — increases stock and logs an expense automatically</span>
+                    <input class="bill-input" type="number" placeholder="Quantity received" x-model="inventoryPurchaseQty" />
+                    <input class="bill-input" type="number" placeholder="Unit cost (optional)" x-model="inventoryPurchaseUnitCost" />
+                    <input class="bill-input" type="text" placeholder="Paid to / supplier (optional)" x-model="inventoryPurchasePaidTo" />
+                    <div class="bill-adjust-row">
+                      <button class="btn-link" @click.stop="toggleInventoryPurchase(item.id)">Cancel</button>
+                      <button class="btn-primary" :disabled="inventorySaving" @click.stop="recordPurchase()">Record Purchase</button>
+                    </div>
+                  </div>
+                </template>
+              </li>
+            </template>
+          </ul>
+        </div>
       </template>
       <template x-if="screen === 'more'">
         <div class="more-screen">

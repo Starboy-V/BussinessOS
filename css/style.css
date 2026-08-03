@@ -635,6 +635,35 @@ html, body {
 
 .job-note-item:last-child { border-bottom: none; padding-bottom: 0; }
 
+/* ---- Inventory / Local Stock (Phase 0 task 8) ---- */
+
+.inventory-item--negative {
+  border-color: var(--color-danger);
+}
+
+.inventory-stock-badge {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.inventory-stock-badge--low {
+  color: var(--color-accent);
+}
+
+.inventory-stock-badge--negative {
+  color: var(--color-danger);
+}
+
+.inventory-low-note {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.inventory-negative-note {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
